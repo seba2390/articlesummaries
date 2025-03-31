@@ -130,8 +130,8 @@ def test_main_job_source_error(mock_logger, mock_config, mock_components):
     # Check the specific arguments of the *first* error call
     assert len(mock_logger.error.call_args_list) > 0
     first_error_call_args = mock_logger.error.call_args_list[0]
-    # Check the message part of the log call
-    assert "An error occurred during the main job execution" in first_error_call_args[0][0]
+    # Check the message part of the log call (updated format)
+    assert "❌ An unexpected error occurred during job execution: Fetch failed!" in first_error_call_args[0][0]
     # Check that exc_info=True was passed in kwargs
     assert first_error_call_args[1].get('exc_info') is True
 

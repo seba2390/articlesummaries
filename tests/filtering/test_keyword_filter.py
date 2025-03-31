@@ -30,7 +30,7 @@ def test_configure_no_keywords(keyword_filter_instance, caplog):
     """Test configuration with an empty or missing keywords list."""
     keyword_filter_instance.configure({})
     assert keyword_filter_instance.keywords == []
-    assert "No keywords specified for KeywordFilter" in caplog.text
+    assert "KeywordFilter configured with no keywords. Filter will pass all papers." in caplog.text
 
     keyword_filter_instance.configure({'keywords': []})
     assert keyword_filter_instance.keywords == []
@@ -66,10 +66,13 @@ def test_filter_no_matches(keyword_filter_instance, sample_papers):
 def test_filter_no_keywords_configured(keyword_filter_instance, sample_papers, caplog):
     """Test that all papers are returned if no keywords are configured."""
     keyword_filter_instance.configure({}) # No keywords
+
+    caplog.clear()
+
     filtered_papers = keyword_filter_instance.filter(sample_papers)
 
     assert len(filtered_papers) == len(sample_papers)
-    assert "KeywordFilter has no keywords configured, returning all papers." in caplog.text
+    assert "Keyword filtering skipped: No keywords are configured." in caplog.text
 
 def test_filter_empty_paper_list(keyword_filter_instance):
     """Test filtering an empty list of papers."""

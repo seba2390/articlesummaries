@@ -60,7 +60,7 @@ def test_output_writes_to_file(mock_open_file, file_writer_instance, relevant_pa
         "Source: test\n",
         "Title: Paper 1\n",
         "Authors: Auth A, Auth B\n",
-        "Published: 2024-01-15\n", # Check formatted date
+        "Updated/Published: 2024-01-15 12:00:00 UTC\n",
         "URL: url1\n",
         "Abstract: Abstract one. Line two.\n\n" # Check newline replacement
     ]
@@ -79,13 +79,16 @@ def test_output_no_papers(mock_open_file, file_writer_instance, caplog):
         file_writer_instance.output([])
 
     mock_open_file.assert_not_called() # File should not be opened
-    assert "No relevant papers to write to file." in caplog.text
+    assert "No relevant papers found in this run. Nothing to write to file." in caplog.text
 
 def test_output_no_file_configured(file_writer_instance, caplog):
     """Test behavior when output_file is not configured (set to None)."""
     file_writer_instance.output_file = None # Simulate missing config value
-    file_writer_instance.output(relevant_papers)
-    assert "No output file specified for FileWriter. Skipping output." in caplog.text
+    # Set caplog level to ERROR for this test
+    with caplog.at_level(logging.ERROR):
+        file_writer_instance.output(relevant_papers) # Pass some papers to trigger the check
+    # Update expected log message
+    assert "FileWriter cannot write output: Output file path is not configured." in caplog.text
 
 @patch("builtins.open", mock_open())
 @patch("src.output.file_writer.logger") # Mock logger within the module
@@ -102,6 +105,7 @@ def test_output_io_error(mock_logger, file_writer_instance, relevant_papers):
 
     # Check that the error was logged
     mock_logger.error.assert_called_once()
-    assert "Error writing to output file test_out.txt" in mock_logger.error.call_args[0][0]
+    # Update expected log message format
+    assert "IOError writing to output file 'test_out.txt': Disk full" in mock_logger.error.call_args[0][0]
     assert isinstance(mock_logger.error.call_args[1]['exc_info'], bool)
     assert mock_logger.error.call_args[1]['exc_info'] is True

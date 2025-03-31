@@ -146,7 +146,7 @@ def test_fetch_papers_max_results_warning(mock_arxiv_search, arxiv_source_instan
     assert len(papers) == 2
 
     # Check that the warning was logged because fetched == max_total_results
-    assert "Reached the maximum limit (2). There might be more papers submitted today." in caplog.text
+    assert "Reached the fetch limit (2). Some papers submitted/updated today might have been missed." in caplog.text
 
 def test_fetch_papers_no_categories(arxiv_source_instance):
     """Test fetching papers when no categories are configured."""
