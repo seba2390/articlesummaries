@@ -1,0 +1,27 @@
+# ArXiv categories to search (e.g., cs.AI, cs.LG, math.AP)
+# Find categories here: https://arxiv.org/category_taxonomy
+categories:
+  - "cs.AI"
+  - "cs.LG"
+  - "stat.ML"
+
+# Filtering criteria
+# Option 1: List of keywords (case-insensitive)
+# If any keyword is found in the title or abstract, the paper is considered relevant.
+keywords:
+  - "transformer"
+  - "diffusion model"
+  - "reinforcement learning"
+
+# Option 2: A subject prompt (more advanced, requires NLP approach - not implemented by default)
+# subject_prompt: "Papers discussing novel methods for large language model alignment."
+
+# Maximum total number of papers to fetch across all categories in a single run.
+# This acts as a safeguard if the number of papers published today is very large.
+max_total_results: 500
+
+# Time of day to run the check (HH:MM format, 24-hour clock)
+run_time_daily: "08:00"
+
+# File to store relevant papers (optional, creates if it doesn't exist)
+output_file: "relevant_papers.txt"
