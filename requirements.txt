@@ -1,6 +1,7 @@
 arxiv
 schedule
 PyYAML
+groq
 
 # Testing
 pytest
