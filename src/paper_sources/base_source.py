@@ -8,38 +8,50 @@ from src.paper import Paper
 
 
 class BasePaperSource(ABC):
-    """Abstract Base Class for different paper sources.
+    """Abstract Base Class (ABC) defining the interface for paper sources.
 
-    Defines the interface that all concrete paper source implementations
-    (like ArxivSource) must adhere to. This allows the main application
-    to treat different sources uniformly.
+    All concrete paper source implementations (e.g., ArxivSource, potentially
+    HALSource, PubMedSource in the future) MUST inherit from this class and
+    implement its abstract methods (`configure` and `fetch_papers`).
+
+    This ensures that the main application logic can interact with different
+    sources in a consistent way, promoting modularity and extensibility.
     """
 
     @abstractmethod
-    def configure(self, config: Dict[str, Any]):
-        """Configures the paper source instance.
-
-        This method should extract necessary configuration parameters
-        (e.g., API keys, categories, fetch limits) from the provided
-        configuration dictionary.
-
-        Args:
-            config: A dictionary containing configuration parameters relevant
-                    to this specific paper source.
-        """
+    def __init__(self):
+        """Abstract initializer for paper sources."""
+        # Concrete implementations should initialize their specific attributes here.
         pass
 
     @abstractmethod
-    def fetch_papers(self) -> List[Paper]:
-        """Fetches papers from the source based on its configuration.
+    def configure(self, config: Dict[str, Any]):
+        """Configures the paper source instance using settings from the application config.
 
-        This method should implement the logic to interact with the
-        specific paper source (e.g., call an API), retrieve papers
-        matching the configured criteria, and convert them into a
-        standardized list of `Paper` objects.
+        Subclasses must implement this method to read their specific configuration
+        details (e.g., API endpoints, search categories, result limits, credentials)
+        from the provided dictionary and store them as instance attributes.
+
+        Args:
+            config: The main application configuration dictionary. Implementations
+                    should typically access their specific section, e.g.,
+                    `config.get('paper_source', {}).get('arxiv', {})`.
+        """
+        raise NotImplementedError  # Ensure subclasses implement this
+
+    @abstractmethod
+    def fetch_papers(self) -> List[Paper]:
+        """Fetches papers from the configured source according to its settings.
+
+        Subclasses must implement this method to perform the core logic of:
+        1. Interacting with the external source (e.g., querying an API).
+        2. Retrieving paper data based on the configuration set in `configure`.
+        3. Converting the retrieved data into a list of standardized `Paper` objects.
+        4. Handling potential errors during the fetching process gracefully.
 
         Returns:
-            A list of `Paper` objects fetched from the source.
-            Returns an empty list if no papers are found or an error occurs.
+            A list of `Paper` objects fetched from the source. Returns an empty
+            list `[]` if no papers are found matching the criteria or if a
+            non-critical error occurs during fetching.
         """
-        pass
+        raise NotImplementedError  # Ensure subclasses implement this

@@ -8,34 +8,50 @@ from src.paper import Paper
 
 
 class BaseFilter(ABC):
-    """Abstract Base Class for different paper filtering strategies.
+    """Abstract Base Class (ABC) defining the interface for paper filters.
 
-    Defines the interface for classes that implement specific ways to filter
-    a list of papers based on certain criteria (e.g., keywords, topic models).
+    All concrete filtering strategies (e.g., KeywordFilter, potentially an
+    LLMEmbeddingsFilter in the future) MUST inherit from this class and
+    implement its abstract methods (`configure` and `filter`).
+
+    This ensures consistent interaction with different filtering methods within
+    the application.
     """
 
     @abstractmethod
-    def configure(self, config: Dict[str, Any]):
-        """Configures the filter instance.
-
-        Extracts necessary parameters (e.g., keywords, model paths) from the
-        provided configuration dictionary specific to this filter's needs.
-
-        Args:
-            config: A dictionary containing configuration parameters relevant
-                    to this specific filter.
-        """
+    def __init__(self):
+        """Abstract initializer for filter strategies."""
+        # Concrete implementations should initialize their specific attributes here.
+        # e.g., self.keywords = [] or self.model = None
         pass
 
     @abstractmethod
-    def filter(self, papers: List[Paper]) -> List[Paper]:
-        """Filters a list of papers based on the implemented strategy.
+    def configure(self, config: Dict[str, Any]):
+        """Configures the filter instance using settings from the application config.
+
+        Subclasses must implement this method to read their specific configuration
+        details (e.g., list of keywords, path to a model file, API keys)
+        from the provided dictionary and store them as instance attributes.
 
         Args:
-            papers: A list of `Paper` objects to be filtered.
+            config: The main application configuration dictionary. Implementations
+                    should access the relevant section(s) for their parameters.
+        """
+        raise NotImplementedError  # Ensure subclasses implement this
+
+    @abstractmethod
+    def filter(self, papers: List[Paper]) -> List[Paper]:
+        """Applies the filter logic to a list of papers.
+
+        Subclasses must implement this method to evaluate each paper in the
+        input list against the filter's criteria (based on its configuration)
+        and return a new list containing only the papers that pass the filter.
+
+        Args:
+            papers: The list of `Paper` objects to be filtered.
 
         Returns:
-            A new list containing only the `Paper` objects that match the
+            A new list containing only the `Paper` objects that satisfy the
             filter's criteria.
         """
-        pass
+        raise NotImplementedError  # Ensure subclasses implement this

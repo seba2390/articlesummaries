@@ -1,6 +1,7 @@
 """Tests for the Groq LLM relevance checker."""
 
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,14 +9,22 @@ import requests
 
 from src.llm.base_checker import LLMResponse
 from src.llm.groq_checker import GroqChecker
+from src.paper import Paper # Import Paper from src.paper
 
+# Logger for test outputs
+logger = logging.getLogger(__name__)
+
+# Sample Paper objects for testing
+paper1 = Paper(id="1", title="Paper 1", abstract="Summary 1", authors=["Author A"], url="url1", categories=["cs.AI"], source="arxiv")
+paper2 = Paper(id="2", title="Paper 2", abstract="Summary 2", authors=["Author B"], url="url2", categories=["cs.LG"], source="arxiv")
+paper3 = Paper(id="3", title="Paper 3", abstract="Summary 3", authors=["Author C"], url="url3", categories=["math.NT"], source="arxiv")
 
 @pytest.fixture
 def groq_checker():
     """Provides a GroqChecker instance for testing."""
     return GroqChecker(api_key="test-api-key")
 
-
+@pytest.mark.llm # Mark this test
 @patch("requests.post")
 def test_check_relevance_success(mock_post, groq_checker):
     """Test successful single relevance check."""
@@ -51,6 +60,7 @@ def test_check_relevance_success(mock_post, groq_checker):
     assert call_kwargs["json"]["messages"][1]["content"] == f"Prompt: {prompt}\n\nAbstract: {abstract}"
 
 
+@pytest.mark.llm # Mark this test
 @patch("requests.post")
 def test_check_relevance_api_error(mock_post, groq_checker):
     """Test handling of API errors during single check."""
@@ -66,6 +76,7 @@ def test_check_relevance_api_error(mock_post, groq_checker):
     assert "Error occurred: API connection failed" in result.explanation
 
 
+@pytest.mark.llm # Mark this test
 @patch("requests.get")
 @patch("requests.post")
 @patch("time.sleep", return_value=None) # Mock time.sleep to speed up test
@@ -151,6 +162,7 @@ def test_check_relevance_batch_success(mock_sleep, mock_post, mock_get, groq_che
     assert get_calls[2][0][0] == "https://api.groq.com/openai/v1/files/file_abc/content"
 
 
+@pytest.mark.llm # Mark this test
 @patch("requests.post")
 def test_check_relevance_batch_creation_error(mock_post, groq_checker):
     """Test handling of errors during batch creation POST request."""
@@ -168,6 +180,7 @@ def test_check_relevance_batch_creation_error(mock_post, groq_checker):
         assert "Error occurred: Batch creation failed" in result.explanation
 
 
+@pytest.mark.llm # Mark this test
 @patch("requests.get")
 @patch("requests.post")
 @patch("time.sleep", return_value=None)
@@ -194,6 +207,7 @@ def test_check_relevance_batch_status_error(mock_sleep, mock_post, mock_get, gro
         assert "Error occurred: Failed to get status" in result.explanation
 
 
+@pytest.mark.llm # Mark this test
 @patch("requests.get")
 @patch("requests.post")
 @patch("time.sleep", return_value=None)
@@ -225,3 +239,120 @@ def test_check_relevance_batch_failed_status(mock_sleep, mock_post, mock_get, gr
         assert result.is_relevant is False
         assert result.confidence == 0.0
         assert "Error occurred: Batch processing failed:" in result.explanation
+
+
+@pytest.mark.llm # Mark the entire class
+class TestGroqChecker:
+    """Tests for the GroqChecker class."""
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_initialization_success(self, mock_groq):
+        """Test successful initialization of GroqChecker."""
+        mock_groq.return_value.chat.completions.create.side_effect = ValueError("API Key not found")
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        assert checker.api_key == "fake_key"
+        assert checker.model == "test-model"
+        assert checker.relevance_criteria == "test criteria"
+        mock_groq.assert_called_once_with(api_key="fake_key")
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_initialization_failure(self, mock_groq):
+        """Test initialization failure of GroqChecker (e.g., Groq client init fails)."""
+        mock_groq.side_effect = Exception("Initialization failed")
+        with pytest.raises(Exception, match="Initialization failed"):
+            GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_check_relevance_batch_success(self, mock_groq):
+        """Test successful batch relevance checking."""
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = ('```json\n' +
+            '[{"paper_id": 0, "is_relevant": true, "reason": "Reason 1", "confidence": 0.9}, ' +
+            ' {"paper_id": 1, "is_relevant": false, "reason": "Reason 2", "confidence": 0.8}]' +
+            '\n```')
+        mock_groq.return_value.chat.completions.create.return_value = mock_response
+
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        results = checker.check_relevance_batch([paper1, paper2])
+
+        assert len(results) == 2
+        assert results[0].is_relevant is True
+        assert results[0].reason == "Reason 1"
+        assert results[0].confidence == 0.9
+        assert results[1].is_relevant is False
+        assert results[1].reason == "Reason 2"
+        assert results[1].confidence == 0.8
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_check_relevance_batch_api_error(self, mock_groq):
+        """Test handling of API errors during batch relevance checking."""
+        mock_groq.return_value.chat.completions.create.side_effect = Exception("API Error")
+
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        results = checker.check_relevance_batch([paper1])
+
+        assert len(results) == 1
+        assert results[0].is_relevant is False # Default to not relevant on error
+        assert results[0].confidence == 0.0
+        assert "Error occurred during LLM relevance check: API Error" in results[0].explanation
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_check_relevance_batch_parsing_error(self, mock_groq):
+        """Test handling of parsing errors in API response."""
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = 'invalid json'
+        mock_groq.return_value.chat.completions.create.return_value = mock_response
+
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        results = checker.check_relevance_batch([paper1])
+
+        assert len(results) == 1
+        assert results[0].is_relevant is False
+        assert results[0].confidence == 0.0
+        assert "Failed to parse LLM response" in results[0].explanation
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_check_relevance_batch_partial_parsing_error(self, mock_groq):
+        """Test handling of partial parsing errors in API response."""
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = ('```json\n' +
+            '[{"paper_id": 0, "is_relevant": true, "reason": "Reason 1", "confidence": 0.9}, ' +
+            ' {"paper_id": 1, "reason": "Reason 2", "confidence": 0.8}]' + # Missing is_relevant
+            '\n```')
+        mock_groq.return_value.chat.completions.create.return_value = mock_response
+
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        results = checker.check_relevance_batch([paper1, paper2])
+
+        assert len(results) == 2
+        # First paper should be parsed correctly
+        assert results[0].is_relevant is True
+        assert results[0].reason == "Reason 1"
+        assert results[0].confidence == 0.9
+        # Second paper should indicate a parsing error due to missing key
+        assert results[1].is_relevant is False
+        assert results[1].confidence == 0.0
+        assert "Error parsing response item for paper_id 1: Missing key 'is_relevant'" in results[1].explanation
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_check_relevance_batch_empty_input(self, mock_groq):
+        """Test batch relevance checking with an empty list of papers."""
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        results = checker.check_relevance_batch([])
+        assert len(results) == 0
+        mock_groq.return_value.chat.completions.create.assert_not_called()
+
+    @patch('src.llm.groq_checker.Groq')
+    def test_check_relevance_batch_unexpected_response_format(self, mock_groq):
+        """Test handling of unexpected response formats from the API."""
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = '{"message": "unexpected format"}'
+        mock_groq.return_value.chat.completions.create.return_value = mock_response
+
+        checker = GroqChecker(api_key="fake_key", model="test-model", relevance_criteria="test criteria")
+        results = checker.check_relevance_batch([paper1])
+
+        assert len(results) == 1
+        assert results[0].is_relevant is False
+        assert results[0].confidence == 0.0
+        assert "LLM response is not a list or could not be parsed" in results[0].explanation

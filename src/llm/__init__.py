@@ -3,4 +3,9 @@
 from .base_checker import BaseLLMChecker, LLMResponse
 from .groq_checker import GroqChecker
 
-__all__ = ["BaseLLMChecker", "LLMResponse", "GroqChecker"]
+# Define what is available for import using `from src.llm import *`
+__all__ = [
+    "BaseLLMChecker",  # Abstract base class for checkers
+    "LLMResponse",  # Dataclass for LLM responses
+    "GroqChecker",  # Concrete implementation using Groq API
+]
