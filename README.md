@@ -275,6 +275,6 @@ The application uses Abstract Base Classes (ABCs) for modularity, making it easi
 
 Contributions are welcome! Please follow standard fork/pull request procedures. (Consider adding guidelines for code style, testing, etc.)
 
-## 📜 License (Placeholder)
+## 📜 License
 
-This project is licensed under the [MIT License](LICENSE). (You would need to add a LICENSE file).
+This project is licensed under the [GNU GPLv3](LICENSE).
