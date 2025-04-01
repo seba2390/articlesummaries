@@ -2,22 +2,22 @@
 
 ## 📝 Description
 
-This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers submitted or updated within the last 24 hours across specified categories, filters them based on relevance (using keyword matching or LLM-based relevance checking), and appends the details of relevant papers to an output file.
+This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers submitted or updated within the last 24 hours across specified categories, filters them based on relevance (using keyword matching or LLM-based relevance checking via Groq), and appends the details of relevant papers to an output file.
 
-The application runs on a daily schedule and is designed with a modular structure, making it easy to extend with new paper sources, different filtering mechanisms, or alternative output methods.
+The application runs on a daily schedule and is designed with a modular structure, making it easy to extend with new paper sources, LLM providers, or output methods.
 
 ## ✨ Features
 
-*   **Configurable Monitoring:** Define arXiv categories, keywords, and fetch limits in a simple `config.yaml` file.
-*   **Recent Paper Fetching:** Focuses on papers submitted/updated within the last 24 hours (relative to script run time).
-*   **Total Results Limit:** Set a maximum total number of papers to fetch (`max_total_results`) as a safeguard.
-*   **Daily Scheduling:** Automatically checks for new papers at a configurable time each day using the `schedule` library.
-*   **Flexible Filtering:** Choose between keyword-based filtering or LLM-based relevance checking using Groq's API.
-*   **Batch Processing:** Option to process papers in batches for improved efficiency with LLM-based checking.
-*   **File Output:** Appends details of relevant papers (ID, Title, Authors, URL, Abstract, Updated Date) to a specified text file.
-*   **Structured Console Output:** Provides clear, formatted logging during execution.
-*   **Modular Design:** Easily extensible with new paper sources, filters, or output handlers using Abstract Base Classes (ABCs).
-*   **Tested:** Includes a `pytest` test suite for verifying functionality.
+*   **Configurable Monitoring:** Define arXiv categories, keywords, and fetch limits in `config.yaml`.
+*   **Recent Paper Fetching:** Fetches arXiv papers submitted/updated within the last 24 hours.
+*   **Keyword Filtering:** Filters papers based on keywords in the title/abstract (default).
+*   **LLM Relevance Checking:** Optionally uses Groq's API (requires API key) for advanced relevance assessment based on a custom prompt.
+*   **Groq Batch Processing:** Leverages Groq's batch API internally for efficient LLM processing when multiple papers are fetched.
+*   **Flexible Output:** Outputs relevant paper details to a configurable file in Markdown or plain text format.
+*   **Daily Scheduling:** Runs automatically at a configurable time using the `schedule` library.
+*   **Structured Logging:** Provides clear console output during execution.
+*   **Modular Design:** Easily extensible with new paper sources or LLM checkers using Abstract Base Classes (ABCs).
+*   **Tested:** Includes a `pytest` test suite.
 
 ## 📁 Project Structure
 
@@ -31,15 +31,19 @@ articlesummaries/
 ├── main.py                 # Main script to run the monitor
 ├── pytest.ini              # Pytest configuration
 ├── README.md               # This file
-├── relevant_papers.txt     # Default output file (created/appended by the script)
+├── relevant_papers.txt     # Default output file (created/appended)
 ├── requirements.txt        # Python dependencies
 ├── src/                    # Source code directory
 │   ├── __init__.py
 │   ├── config_loader.py    # Handles loading config.yaml
+│   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
 │   │   ├── base_filter.py  # ABC for filters
 │   │   └── keyword_filter.py # Keyword filtering implementation
-│   ├── llm_relevance.py    # LLM-based relevance checking
+│   ├── llm/                # Modules for LLM relevance checking
+│   │   ├── __init__.py
+│   │   ├── base_checker.py # ABC for LLM checkers
+│   │   └── groq_checker.py # Groq implementation
 │   ├── output/             # Modules for handling output
 │   │   ├── __init__.py
 │   │   ├── base_output.py  # ABC for output handlers
@@ -55,6 +59,9 @@ articlesummaries/
 │   ├── filtering/
 │   │   ├── __init__.py
 │   │   └── test_keyword_filter.py
+│   ├── llm/
+│   │   ├── __init__.py
+│   │   └── test_groq_checker.py # (Example test location)
 │   ├── output/
 │   │   ├── __init__.py
 │   │   └── test_file_writer.py
@@ -64,7 +71,7 @@ articlesummaries/
 │   ├── test_config_loader.py
 │   ├── test_main.py
 │   └── test_scheduler.py
-└── venv/                   # Virtual environment (if created according to setup)
+└── venv/                   # Virtual environment (if created)
 ```
 *Note: Cache, venv, and output files might be generated during setup/runtime.*
 
@@ -90,162 +97,77 @@ articlesummaries/
     pip install -r requirements.txt
     ```
 
-## ⚙️ Configuration
+## ⚙️ Configuration (`config.yaml`)
 
-The `config.yaml` file controls all aspects of the application. Here's a detailed breakdown of all available settings:
+This file controls the application's behavior.
 
-### Paper Source Configuration
 ```yaml
-paper_source:
-  arxiv:
-    categories: ["cs.AI", "cs.LG"]  # List of arXiv categories to monitor
-    keywords: ["machine learning", "neural networks"]  # Keywords for filtering
-    max_total_results: 100  # Maximum papers to fetch per run
-    sort_by: "submittedDate"  # Sort papers by submission date
-    sort_order: "descending"  # Get newest papers first
-```
+# --- Paper Source Configuration (Currently only arXiv) ---
+categories: ["cs.AI", "cs.LG"]  # List of arXiv category identifiers (e.g., cs.AI, math.AP). Find categories [here](https://arxiv.org/category_taxonomy).
+max_total_results: 100        # Max papers to fetch from arXiv per run (before date filtering).
 
-### Relevance Checking Configuration
-```yaml
+# --- Relevance Checking Configuration ---
 relevance_checker:
-  type: "keyword"  # or "llm"
+  type: "keyword" # Options: "keyword" or "llm"
 
-  # For keyword-based checking (type: "keyword")
-  keywords: ["machine learning", "neural networks"]  # Keywords to match
+  # Settings for 'type: "keyword"'
+  # Uses the keywords below to filter papers fetched by ArxivSource.
+  keywords: ["machine learning", "neural network", "deep learning"] # List of keywords (case-insensitive) to match in title/abstract.
 
-  # For LLM-based checking (type: "llm")
+  # Settings for 'type: "llm"'
   llm:
-    provider: "groq"  # Currently supports "groq" or "custom"
-    api_key: "your-groq-api-key"  # Required for Groq
-    model: "llama-3.1-8b-instant"  # Groq model to use
-    prompt: "Is this paper relevant to machine learning research?"  # Custom prompt
-    confidence_threshold: 0.7  # Minimum confidence (0-1) to consider relevant
+    # Currently only "groq" provider is implemented.
+    provider: "groq"
 
-    # For custom LLM provider
-    custom:
-      module_path: "path.to.your.module"  # Python module path
-      class_name: "YourLLMChecker"  # Class name in the module
-```
+    # Settings specific to the "groq" provider
+    groq:
+      # REQUIRED if provider is "groq". Get from https://console.groq.com/keys
+      api_key: "YOUR_GROQ_API_KEY"
+      # Optional: Specify a Groq model. Defaults internally to a suitable model like llama-3.1-8b-instant.
+      # model: "llama-3.1-8b-instant"
+      # The prompt used to ask the LLM about relevance.
+      prompt: "Based on the abstract, is this paper relevant to the field of generative AI models?"
+      # Minimum confidence score (0.0 to 1.0) from the LLM to consider a paper relevant.
+      confidence_threshold: 0.7
 
-### Output Configuration
-```yaml
+# --- Output Configuration ---
 output:
-  file: "relevant_papers.txt"  # Output file path
-  format: "markdown"  # or "plain"
-  include_confidence: true  # Include LLM confidence scores
-  include_explanation: true  # Include LLM explanations
-```
+  # Path to the file where relevant paper details will be appended.
+  file: "relevant_papers.txt"
+  # Format for the output file. Options: "markdown" or "plain"
+  format: "markdown"
+  # Only applies if relevance_checker.type is "llm".
+  include_confidence: true
+  # Only applies if relevance_checker.type is "llm".
+  include_explanation: true
 
-### Scheduling Configuration
-```yaml
+# --- Scheduling Configuration ---
 schedule:
-  run_time: "09:00"  # Daily run time (24-hour format)
-  timezone: "UTC"  # Timezone for run time
+  # Time of day (HH:MM format, 24-hour clock) to run the check automatically.
+  run_time: "09:00"
+  # Optional: Timezone for the run_time. Defaults to system local time if omitted.
+  # Examples: "UTC", "America/New_York". See Python's zoneinfo or pytz library for names.
+  # timezone: "UTC"
 ```
 
-## 🚀 Extensibility
+**Configuration Details:**
 
-The application is designed to be easily extended with new paper sources and LLM checkers. Here's how to add your own implementations:
-
-### Adding a New Paper Source
-
-1. Create a new file in `src/paper_sources/` (e.g., `custom_source.py`):
-```python
-from .base_source import BasePaperSource
-from ..paper import Paper
-
-class CustomPaperSource(BasePaperSource):
-    def configure(self, config: Dict[str, Any]) -> None:
-        """Configure the source with settings from config.yaml."""
-        self.settings = config["paper_source"]["custom"]
-
-    def fetch_papers(self) -> List[Paper]:
-        """Fetch papers from your custom source."""
-        # Implement your paper fetching logic here
-        papers = []
-        # ... fetch papers from your source ...
-        return papers
-```
-
-2. Update `src/paper_sources/__init__.py`:
-```python
-from .custom_source import CustomPaperSource
-
-__all__ = ["ArxivSource", "CustomPaperSource"]
-```
-
-3. Add configuration in `config.yaml`:
-```yaml
-paper_source:
-  custom:
-    # Your custom source settings
-```
-
-### Adding a New LLM Checker
-
-1. Create a new file in `src/llm/` (e.g., `custom_checker.py`):
-```python
-from .base_checker import BaseLLMChecker, LLMResponse
-
-class CustomLLMChecker(BaseLLMChecker):
-    def __init__(self, api_key: str):
-        """Initialize your LLM checker."""
-        self.api_key = api_key
-        # ... setup your LLM client ...
-
-    def check_relevance(self, abstract: str, prompt: str) -> LLMResponse:
-        """Check relevance using your LLM."""
-        # Implement single paper checking
-        return LLMResponse(
-            is_relevant=True,
-            confidence=0.8,
-            explanation="Your explanation"
-        )
-
-    def check_relevance_batch(self, abstracts: List[str], prompt: str) -> List[LLMResponse]:
-        """Check relevance for multiple papers."""
-        # Implement batch checking
-        return [self.check_relevance(abstract, prompt) for abstract in abstracts]
-```
-
-2. Update `src/llm/__init__.py`:
-```python
-from .custom_checker import CustomLLMChecker
-
-__all__ = ["BaseLLMChecker", "LLMResponse", "GroqChecker", "CustomLLMChecker"]
-```
-
-3. Add configuration in `config.yaml`:
-```yaml
-relevance_checker:
-  type: "llm"
-  llm:
-    provider: "custom"
-    custom:
-      module_path: "src.llm.custom_checker"
-      class_name: "CustomLLMChecker"
-```
-
-### Testing Your Extensions
-
-1. Create test files in the appropriate `tests/` directory:
-```python
-# tests/paper_sources/test_custom_source.py
-def test_custom_source():
-    source = CustomPaperSource()
-    # ... test your implementation ...
-
-# tests/llm/test_custom_checker.py
-def test_custom_checker():
-    checker = CustomLLMChecker("test-key")
-    # ... test your implementation ...
-```
-
-2. Run the tests:
-```bash
-pytest tests/paper_sources/test_custom_source.py
-pytest tests/llm/test_custom_checker.py
-```
+*   **`categories`**: Defines which arXiv categories to monitor. (Required)
+*   **`max_total_results`**: Limits how many recent papers arXiv returns *before* date filtering. Acts as a safety net. (Default: 500 in code if not set, example uses 100)
+*   **`relevance_checker.type`**: Determines the filtering method.
+    *   `"keyword"`: Uses the `relevance_checker.keywords` list to filter papers fetched by `ArxivSource`.
+    *   `"llm"`: Uses the configured LLM provider (currently only Groq) to check relevance.
+*   **`relevance_checker.keywords`**: List of case-insensitive keywords used *only* when `type` is `"keyword"`.
+*   **`relevance_checker.llm.provider`**: Specifies the LLM service. Currently, only `"groq"` is supported.
+*   **`relevance_checker.llm.groq.api_key`**: Your API key for Groq. **Required** if `provider` is `"groq"`.
+*   **`relevance_checker.llm.groq.model`**: (Optional) Specify a Groq model. If omitted, the `GroqChecker` class uses a default (e.g., `llama-3.1-8b-instant`).
+*   **`relevance_checker.llm.groq.prompt`**: The question/instruction given to the LLM for each paper's abstract.
+*   **`relevance_checker.llm.groq.confidence_threshold`**: The minimum confidence score (0.0-1.0) required from the LLM response for a paper to be considered relevant.
+*   **`output.file`**: Path where results are appended. (Default: `relevant_papers.txt`)
+*   **`output.format`**: Style of the output file (`"markdown"` or `"plain"`).
+*   **`output.include_confidence` / `include_explanation`**: Whether to include LLM metadata in the output (only applies when `relevance_checker.type` is `"llm"`).
+*   **`schedule.run_time`**: Time for the daily automatic run. (Default: "08:00" in code if not set, example uses "09:00")
+*   **`schedule.timezone`**: (Optional) Specifies the timezone for `run_time`. If omitted, the system's local timezone is used by the `schedule` library.
 
 ## ▶️ Usage
 
@@ -255,32 +177,137 @@ Run the main script from the project's root directory:
 python main.py
 ```
 
-The script will perform an initial check upon starting and then run daily at the time specified in `config.yaml`. It will log its progress to the console with clear formatting. Press `Ctrl+C` to stop the script gracefully.
+The script will perform an initial check upon starting and then run daily at the time specified in `config.yaml`. It logs progress to the console. Press `Ctrl+C` to stop.
 
 ## ✅ Testing
 
-The project includes a test suite using `pytest`. To run the tests:
-
-1.  Ensure you have installed the dependencies (including `pytest` and `pytest-mock`) from `requirements.txt`.
-2.  Run `pytest` from the project's root directory:
+1.  Ensure development dependencies are installed: `pip install -r requirements.txt` (includes `pytest`, `pytest-mock`).
+2.  Run `pytest` from the project root:
     ```bash
     pytest
     ```
-    Or for more detailed output:
-    ```bash
-    pytest -v
+    Or for more detailed output: `pytest -v`
+
+## 🚀 Extensibility
+
+The application uses Abstract Base Classes (ABCs) for modularity.
+
+### Adding a New Paper Source
+
+*(Currently, the main script is hardcoded to use `ArxivSource`. Future improvements could make this configurable.)*
+
+1.  **Create Source Class:** In `src/paper_sources/`, create `your_source.py` inheriting from `BasePaperSource`:
+    ```python
+    # src/paper_sources/your_source.py
+    import logging
+    from typing import Any, Dict, List
+    from src.paper import Paper
+    from .base_source import BasePaperSource
+
+    logger = logging.getLogger(__name__)
+
+    class YourSource(BasePaperSource):
+        def configure(self, config: Dict[str, Any]):
+            # Read source-specific config, e.g., config['paper_source']['your_source']
+            logger.info("Configuring YourSource...")
+            # self.api_endpoint = config['paper_source']['your_source']['endpoint']
+
+        def fetch_papers(self) -> List[Paper]:
+            logger.info("Fetching papers from YourSource...")
+            papers = []
+            # --- Add logic to fetch data from your source ---
+            # Example: fetched_data = requests.get(self.api_endpoint).json()
+            # for item in fetched_data:
+            #     papers.append(Paper(id=..., title=..., ... source="your_source"))
+            return papers
     ```
+2.  **Update `__init__.py`:** Add your class to `src/paper_sources/__init__.py`:
+    ```python
+    # src/paper_sources/__init__.py
+    from .base_source import BasePaperSource
+    from .arxiv_source import ArxivSource
+    from .your_source import YourSource # Add this
+
+    __all__ = ["BasePaperSource", "ArxivSource", "YourSource"] # Add here
+    ```
+3.  **(Future Step)** Modify `main.py` to instantiate and use your source based on `config.yaml`.
+
+### Adding a New LLM Checker
+
+*(Currently, `main.py` directly instantiates `GroqChecker` if type is "llm". Future improvements could make the provider selection dynamic based on config.)*
+
+1.  **Create Checker Class:** In `src/llm/`, create `your_checker.py` inheriting from `BaseLLMChecker`:
+    ```python
+    # src/llm/your_checker.py
+    import logging
+    from typing import Any, Dict, List
+    from .base_checker import BaseLLMChecker, LLMResponse
+
+    logger = logging.getLogger(__name__)
+
+    class YourChecker(BaseLLMChecker):
+        def __init__(self, api_key: str, model: str | None = None): # Adapt args as needed
+            logger.info(f"Initializing YourChecker with model: {model or 'default'}")
+            self.api_key = api_key
+            # --- Initialize your LLM client ---
+            # self.client = YourLLMClient(api_key=api_key, model=model)
+
+        def check_relevance(self, abstract: str, prompt: str) -> LLMResponse:
+            logger.debug("Checking single relevance with YourChecker")
+            # --- Call your LLM API for a single abstract ---
+            # Example: response = self.client.generate(...)
+            is_relevant = True # Parse from response
+            confidence = 0.9 # Parse from response
+            explanation = "Explanation from YourChecker" # Parse from response
+            return LLMResponse(is_relevant, confidence, explanation)
+
+        def check_relevance_batch(self, abstracts: List[str], prompt: str) -> List[LLMResponse]:
+            logger.debug(f"Checking batch relevance ({len(abstracts)} abstracts) with YourChecker")
+            responses = []
+            # --- Call your LLM API for a batch of abstracts ---
+            # If your API supports batching, implement it here.
+            # Otherwise, loop and call check_relevance:
+            for abstract in abstracts:
+                responses.append(self.check_relevance(abstract, prompt))
+            return responses
+    ```
+2.  **Update `__init__.py`:** Add your class to `src/llm/__init__.py`:
+    ```python
+    # src/llm/__init__.py
+    from .base_checker import BaseLLMChecker, LLMResponse
+    from .groq_checker import GroqChecker
+    from .your_checker import YourChecker # Add this
+
+    __all__ = ["BaseLLMChecker", "LLMResponse", "GroqChecker", "YourChecker"] # Add here
+    ```
+3.  **Update Configuration:** Add settings for your checker in `config.yaml`:
+    ```yaml
+    relevance_checker:
+      type: "llm"
+      llm:
+        provider: "your_checker" # Use a unique name
+        your_checker: # Match the provider name
+          api_key: "YOUR_CHECKER_API_KEY"
+          model: "your-model-name" # Optional model setting
+          # Add other specific settings if needed
+    ```
+4.  **(Future Step)** Modify `main.py` in `create_relevance_checker` to instantiate `YourChecker` when `provider` is `"your_checker"`.
+
+### Adding a New Output Handler
+
+*(Similar process: create class inheriting `BaseOutput` in `src/output/`, update `__init__.py`, modify `main.py`.)*
 
 ## 📦 Dependencies
 
 *   **Runtime:**
     *   [arxiv](https://pypi.org/project/arxiv/): Python wrapper for the arXiv API.
     *   [schedule](https://pypi.org/project/schedule/): Human-friendly Python job scheduling.
-    *   [PyYAML](https://pypi.org/project/PyYAML/): YAML parser and emitter for Python.
-    *   [groq](https://pypi.org/project/groq/): Python client for Groq API (Note: review usage if integrated).
+    *   [PyYAML](https://pypi.org/project/PyYAML/): YAML parser/emitter.
+    *   [requests](https://pypi.org/project/requests/): HTTP library (used by Groq checker).
+    *   [groq](https://pypi.org/project/groq/): Python client for Groq API.
 *   **Testing:**
     *   [pytest](https://pypi.org/project/pytest/): Testing framework.
     *   [pytest-mock](https://pypi.org/project/pytest-mock/): Pytest fixture for mocking.
 
 ---
-_This README reflects the project structure and dependencies as of April 2024._
+_README updated April 2024._
