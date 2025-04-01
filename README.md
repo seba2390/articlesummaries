@@ -2,22 +2,25 @@
 
 ## 📝 Description
 
-This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers submitted or updated within the last 24 hours across specified categories, filters them based on relevance (using keyword matching or LLM-based relevance checking via Groq), and appends the details of relevant papers to an output file.
+This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers updated on the previous calendar day across specified categories, checks their relevance (using keyword matching or LLM-based assessment via Groq), and can send an email summary containing the details of relevant papers.
 
-The application runs on a daily schedule and is designed with a modular structure, making it easy to extend with new paper sources, LLM providers, or output methods.
+The application runs on a daily schedule and is designed with a modular structure.
 
 ## ✨ Features
 
-*   **Configurable Monitoring:** Define arXiv categories, keywords, and fetch limits in `config.yaml`.
-*   **Recent Paper Fetching:** Fetches arXiv papers submitted/updated within the last 24 hours.
-*   **Keyword Filtering:** Filters papers based on keywords in the title/abstract (default).
-*   **LLM Relevance Checking:** Optionally uses Groq's API (requires API key) for advanced relevance assessment based on a custom prompt.
-*   **Groq Batch Processing:** Leverages Groq's batch API internally for efficient LLM processing when multiple papers are fetched.
-*   **Flexible Output:** Outputs relevant paper details to a configurable file in Markdown or plain text format.
-*   **Daily Scheduling:** Runs automatically at a configurable time using the `schedule` library.
-*   **Structured Logging:** Provides clear console output during execution.
-*   **Modular Design:** Easily extensible with new paper sources or LLM checkers using Abstract Base Classes (ABCs).
-*   **Tested:** Includes a `pytest` test suite.
+*   **Configurable Monitoring:** Define arXiv categories and fetch limits in `config.yaml`.
+*   **Previous Day Fetching:** Fetches arXiv papers last updated on the previous calendar day (UTC).
+*   **Flexible Relevance Checking:** Choose the checking method via `relevance_checking_method` in `config.yaml`:
+    *   `"keyword"`: Filters papers based on keywords (defined per source) found in the title/abstract.
+    *   `"llm"`: Uses Groq's API (requires API key) for advanced relevance assessment based on a custom prompt.
+*   **Groq Batch Processing:** Leverages Groq's batch API internally for efficient LLM processing.
+*   **Email Summaries:** Optionally sends beautifully formatted HTML email summaries of each run, embedding relevant paper details (title, link, authors, categories, keywords/LLM info, abstract).
+*   **Configurable Output File:** Appends relevant paper details to a text file in Markdown or plain text format.
+*   **Daily Scheduling:** Runs automatically at a configurable time and timezone.
+*   **Progress Indicator:** Uses `tqdm` to show progress during arXiv API result processing.
+*   **Structured Logging:** Provides clear console output.
+*   **Modular Design:** Extensible with new paper sources or LLM checkers (via ABCs).
+*   **Tested:** Includes `pytest` tests.
 
 ## 📁 Project Structure
 
@@ -36,37 +39,43 @@ articlesummaries/
 ├── src/                    # Source code directory
 │   ├── __init__.py
 │   ├── config_loader.py    # Handles loading config.yaml
+│   │   ├── __init__.py
+│   │   └── config_loader.py # Handles loading config.yaml
 │   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
-│   │   ├── base_filter.py  # ABC for filters
+│   │   └── filtering/     # Modules for filtering papers
 │   │   └── keyword_filter.py # Keyword filtering implementation
 │   ├── llm/                # Modules for LLM relevance checking
 │   │   ├── __init__.py
-│   │   ├── base_checker.py # ABC for LLM checkers
+│   │   └── llm/           # Modules for LLM relevance checking
 │   │   └── groq_checker.py # Groq implementation
+│   ├── notifications/      # Modules for sending notifications
+│   │   ├── __init__.py     # (optional)
+│   │   └── notifications/ # Modules for sending notifications
+│   │   └── email_sender.py # Email summary implementation
 │   ├── output/             # Modules for handling output
 │   │   ├── __init__.py
-│   │   ├── base_output.py  # ABC for output handlers
+│   │   └── output/        # Modules for handling output
+│   │   └── base_output.py  # ABC for output handlers
 │   │   └── file_writer.py  # File writing implementation
 │   ├── paper_sources/      # Modules for fetching papers
 │   │   ├── __init__.py
-│   │   ├── base_source.py  # ABC for paper sources
+│   │   └── paper_sources/ # Modules for fetching papers
+│   │   └── base_source.py  # ABC for paper sources
 │   │   └── arxiv_source.py # arXiv implementation
 │   ├── paper.py            # Defines the Paper data structure
 │   └── scheduler.py        # Handles job scheduling
 ├── tests/                  # Test suite directory
 │   ├── __init__.py
 │   ├── filtering/
-│   │   ├── __init__.py
 │   │   └── test_keyword_filter.py
 │   ├── llm/
-│   │   ├── __init__.py
-│   │   └── test_groq_checker.py # (Example test location)
+│   │   └── test_groq_checker.py
+│   ├── notifications/
+│   │   └── test_email_sender.py # (Example test location)
 │   ├── output/
-│   │   ├── __init__.py
 │   │   └── test_file_writer.py
 │   ├── paper_sources/
-│   │   ├── __init__.py
 │   │   └── test_arxiv_source.py
 │   ├── test_config_loader.py
 │   ├── test_main.py
@@ -99,22 +108,38 @@ articlesummaries/
 
 ## ⚙️ Configuration (`config.yaml`)
 
-This file controls the application's behavior.
+This file controls the application's behavior. See comments within the file for detailed explanations.
 
 ```yaml
-# --- Paper Source Configuration (Currently only arXiv) ---
-categories: ["cs.AI", "cs.LG"]  # List of arXiv category identifiers (e.g., cs.AI, math.AP). Find categories [here](https://arxiv.org/category_taxonomy).
-max_total_results: 100        # Max papers to fetch from arXiv per run (before date filtering).
+# Configuration file for arXiv Paper Monitor
 
-# --- Relevance Checking Configuration ---
+# Maximum total number of papers to fetch across *all* categories in a single run.
+# This acts as a safeguard if the number of papers published today is very large.
+max_total_results: 500
+
+# --- Relevance Checking Method ---
+# Determines the overall method used for checking paper relevance.
+# Options: "keyword" or "llm"
+relevance_checking_method: "keyword"
+
+# --- Paper Source Configuration ---
+paper_source:
+  type: "arxiv" # Currently only supports arXiv
+  arxiv:
+    # ArXiv categories to search (e.g., cs.AI, cs.LG, math.AP)
+    # Find categories here: https://arxiv.org/category_taxonomy
+    categories: ["cs.AI", "cs.LG", "cs.CL"]
+
+    # Keywords specifically for filtering papers fetched from this arXiv source
+    # Used ONLY when relevance_checking_method is "keyword".
+    keywords: ["large language model", "transformer", "attention"]
+
+    # fetch_window: 24 # NOTE: Fetch window is currently hardcoded in ArxivSource to previous day
+
+# --- Relevance Checker Specific Settings ---
+# Contains settings used by the different relevance checking methods.
 relevance_checker:
-  type: "keyword" # Options: "keyword" or "llm"
-
-  # Settings for 'type: "keyword"'
-  # Uses the keywords below to filter papers fetched by ArxivSource.
-  keywords: ["machine learning", "neural network", "deep learning"] # List of keywords (case-insensitive) to match in title/abstract.
-
-  # Settings for 'type: "llm"'
+  # Settings used when relevance_checking_method is "llm"
   llm:
     # Currently only "groq" provider is implemented.
     provider: "groq"
@@ -122,8 +147,8 @@ relevance_checker:
     # Settings specific to the "groq" provider
     groq:
       # REQUIRED if provider is "groq". Get from https://console.groq.com/keys
-      api_key: "YOUR_GROQ_API_KEY"
-      # Optional: Specify a Groq model. Defaults internally to a suitable model like llama-3.1-8b-instant.
+      api_key: "YOUR_GROQ_API_KEY" # Replace with your key
+      # Optional: Specify a Groq model. Defaults internally to llama-3.1-8b-instant.
       # model: "llama-3.1-8b-instant"
       # The prompt used to ask the LLM about relevance.
       prompt: "Based on the abstract, is this paper relevant to the field of generative AI models?"
@@ -136,9 +161,9 @@ output:
   file: "relevant_papers.txt"
   # Format for the output file. Options: "markdown" or "plain"
   format: "markdown"
-  # Only applies if relevance_checker.type is "llm".
+  # Only applies if relevance_checking_method is "llm". Include LLM confidence score?
   include_confidence: true
-  # Only applies if relevance_checker.type is "llm".
+  # Only applies if relevance_checking_method is "llm". Include LLM explanation?
   include_explanation: true
 
 # --- Scheduling Configuration ---
@@ -146,28 +171,51 @@ schedule:
   # Time of day (HH:MM format, 24-hour clock) to run the check automatically.
   run_time: "09:00"
   # Optional: Timezone for the run_time. Defaults to system local time if omitted.
-  # Examples: "UTC", "America/New_York". See Python's zoneinfo or pytz library for names.
+  # Examples: "UTC", "America/New_York". Requires 'pytz' or Python 3.9+ ('zoneinfo').
   # timezone: "UTC"
+
+# --- Notifications Configuration ---
+notifications:
+  # Set to true to enable sending summary emails, false to disable.
+  send_email_summary: true
+
+  # List of email addresses that will receive the summary email.
+  email_recipients:
+    - "user1@example.com"
+    # - "user2@example.com"
+
+  # Sender Email Credentials - IMPORTANT: See security note in guide below!
+  email_sender:
+    address: "your_sender_email@gmail.com"
+    # Use App Password for Gmail if 2FA is enabled
+    password: "YOUR_APP_PASSWORD_OR_REGULAR_PASSWORD"
+
+  # SMTP Server Details (Lookup for your provider)
+  smtp:
+    server: "smtp.gmail.com"
+    port: 587 # Usually 587 for TLS
 ```
 
-**Configuration Details:**
+**Configuration Details Guide:**
 
-*   **`categories`**: Defines which arXiv categories to monitor. (Required)
-*   **`max_total_results`**: Limits how many recent papers arXiv returns *before* date filtering. Acts as a safety net. (Default: 500 in code if not set, example uses 100)
-*   **`relevance_checker.type`**: Determines the filtering method.
-    *   `"keyword"`: Uses the `relevance_checker.keywords` list to filter papers fetched by `ArxivSource`.
-    *   `"llm"`: Uses the configured LLM provider (currently only Groq) to check relevance.
-*   **`relevance_checker.keywords`**: List of case-insensitive keywords used *only* when `type` is `"keyword"`.
-*   **`relevance_checker.llm.provider`**: Specifies the LLM service. Currently, only `"groq"` is supported.
-*   **`relevance_checker.llm.groq.api_key`**: Your API key for Groq. **Required** if `provider` is `"groq"`.
-*   **`relevance_checker.llm.groq.model`**: (Optional) Specify a Groq model. If omitted, the `GroqChecker` class uses a default (e.g., `llama-3.1-8b-instant`).
-*   **`relevance_checker.llm.groq.prompt`**: The question/instruction given to the LLM for each paper's abstract.
-*   **`relevance_checker.llm.groq.confidence_threshold`**: The minimum confidence score (0.0-1.0) required from the LLM response for a paper to be considered relevant.
+*   **`max_total_results`**: Limits how many papers arXiv returns *per category list query* for the target date. Acts as a safety net. (Default: 500 in code if not set)
+*   **`relevance_checking_method`**: Selects the core logic: `"keyword"` or `"llm"`. (Required)
+*   **`paper_source.arxiv.categories`**: List of arXiv categories to fetch from. (Required)
+*   **`paper_source.arxiv.keywords`**: List of case-insensitive keywords used *only* when `relevance_checking_method` is `"keyword"`.
+*   **`relevance_checker.llm.provider`**: Specifies the LLM service (currently only `"groq"`). Used only if method is `"llm"`.
+*   **`relevance_checker.llm.groq.api_key`**: Your Groq API key. **Required** if method is `"llm"` and provider is `"groq"`.
+*   **`relevance_checker.llm.groq.model`**: (Optional) Specify a Groq model. Defaults to `llama-3.1-8b-instant` in the code.
+*   **`relevance_checker.llm.groq.prompt`**: The question/instruction given to the LLM.
+*   **`relevance_checker.llm.groq.confidence_threshold`**: Minimum LLM confidence (0.0-1.0) to mark a paper as relevant.
 *   **`output.file`**: Path where results are appended. (Default: `relevant_papers.txt`)
 *   **`output.format`**: Style of the output file (`"markdown"` or `"plain"`).
-*   **`output.include_confidence` / `include_explanation`**: Whether to include LLM metadata in the output (only applies when `relevance_checker.type` is `"llm"`).
-*   **`schedule.run_time`**: Time for the daily automatic run. (Default: "08:00" in code if not set, example uses "09:00")
-*   **`schedule.timezone`**: (Optional) Specifies the timezone for `run_time`. If omitted, the system's local timezone is used by the `schedule` library.
+*   **`output.include_confidence` / `include_explanation`**: Whether to include LLM metadata in the *output file* (only applies when method is `"llm"`).
+*   **`schedule.run_time`**: Time for the daily automatic run (HH:MM). (Default: "08:00" in code if not set)
+*   **`schedule.timezone`**: (Optional) Timezone for `run_time`. Requires `pytz` or Python >= 3.9.
+*   **`notifications.send_email_summary`**: Enable/disable email (`true`/`false`).
+*   **`notifications.email_recipients`**: List of recipient email addresses.
+*   **`notifications.email_sender.address` / `password`**: Credentials for the *sending* email account. **Security Warning:** Use App Passwords (Gmail 2FA) or environment variables instead of storing plain passwords here!
+*   **`notifications.smtp.server` / `port`**: Your email provider's outgoing mail server details (e.g., `smtp.gmail.com`, port `587`).
 
 ## ▶️ Usage
 
@@ -297,17 +345,13 @@ The application uses Abstract Base Classes (ABCs) for modularity.
 
 *(Similar process: create class inheriting `BaseOutput` in `src/output/`, update `__init__.py`, modify `main.py`.)*
 
+### Adding a New Notification Handler
+*(Currently, only email is implemented directly. For other methods like Slack or Discord, you would create a new class in `src/notifications/`, potentially define a `BaseNotifier` ABC, and modify `main.py` to call your new handler based on configuration.)*
+
 ## 📦 Dependencies
 
-*   **Runtime:**
-    *   [arxiv](https://pypi.org/project/arxiv/): Python wrapper for the arXiv API.
-    *   [schedule](https://pypi.org/project/schedule/): Human-friendly Python job scheduling.
-    *   [PyYAML](https://pypi.org/project/PyYAML/): YAML parser/emitter.
-    *   [requests](https://pypi.org/project/requests/): HTTP library (used by Groq checker).
-    *   [groq](https://pypi.org/project/groq/): Python client for Groq API.
-*   **Testing:**
-    *   [pytest](https://pypi.org/project/pytest/): Testing framework.
-    *   [pytest-mock](https://pypi.org/project/pytest-mock/): Pytest fixture for mocking.
+*   **Runtime:** `arxiv`, `schedule`, `PyYAML`, `requests`, `groq`, `tqdm` (Optional: `pytz` for timezone on Python < 3.9)
+*   **Testing:** `pytest`, `pytest-mock`
 
 ---
 _README updated April 2024._

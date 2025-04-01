@@ -11,11 +11,13 @@ This script orchestrates the application flow:
 import logging
 import sys
 import time
+from datetime import datetime  # Import datetime for run start time
 from typing import Any, Dict, List, Optional
 
 from src.config_loader import load_config
 from src.filtering.keyword_filter import KeywordFilter
 from src.llm import GroqChecker
+from src.notifications.email_sender import EmailSender  # Import EmailSender
 from src.output.file_writer import FileWriter
 from src.paper import Paper
 from src.paper_sources.arxiv_source import ArxivSource
@@ -46,6 +48,8 @@ def print_separator(char="=", length=70):
 # --- Main Job Definition ---
 def check_papers(config: Dict[str, Any]) -> None:
     """Check for new relevant papers."""
+    run_start_time = datetime.now()
+    num_fetched = 0  # Track number fetched for summary
     try:
         source = ArxivSource()
         source.configure(config)
@@ -78,6 +82,7 @@ def check_papers(config: Dict[str, Any]) -> None:
             checking_method = "keyword"
 
         papers: List[Paper] = source.fetch_papers()
+        num_fetched = len(papers)  # Store number fetched
         logger.info(f"📚 Fetched {len(papers)} papers from arXiv matching date criteria.")
 
         relevant_papers: List[Paper] = []
@@ -124,16 +129,35 @@ def check_papers(config: Dict[str, Any]) -> None:
 
         logger.info(f"✅ Found {len(relevant_papers)} relevant papers after checking.")
 
+        output_file_path = None
         if relevant_papers:
             output_config = config.get("output", {})
             file_writer = FileWriter()
             file_writer.configure(output_config)
             file_writer.output(relevant_papers)
+            output_file_path = file_writer.output_file  # Get the actual path used
         else:
             logger.info("ℹ️ No relevant papers to save.")
+            # Still get the configured output path for potential email attachment
+            output_file_path = config.get("output", {}).get("file", FileWriter.DEFAULT_FILENAME)
+
+        # --- Send Email Summary ---
+        run_end_time = datetime.now()
+        run_duration = (run_end_time - run_start_time).total_seconds()
+        try:
+            email_sender = EmailSender(config)
+            email_sender.send_summary_email(
+                num_fetched=num_fetched,
+                relevant_papers=relevant_papers,
+                run_duration_secs=run_duration,
+                checking_method=checking_method,
+            )
+        except Exception as mail_e:
+            logger.error(f"Failed to send summary email: {mail_e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"❌ An unexpected error occurred during job execution: {e}", exc_info=True)
+        # Optionally send a failure email here if desired
 
 
 # --- Script Entry Point ---
