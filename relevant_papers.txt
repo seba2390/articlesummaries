@@ -1,0 +1,523 @@
+## Learning out-of-time-ordered correlators with classical kernel methods
+
+**Authors:** John Tanner, Jason Pye, Jingbo Wang
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2409.01592v2
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Out-of-Time Ordered Correlators (OTOCs) are widely used to investigate
+information scrambling in quantum systems. However, directly computing OTOCs
+with classical computers is an expensive procedure. This is due to the need to
+classically simulate the dynamics of quantum many-body systems, which entails
+computational costs that scale rapidly with system size. Similarly, exact
+simulation of the dynamics with a quantum computer (QC) will either only be
+possible for short times with noisy intermediate-scale quantum (NISQ) devices,
+or will require a fault-tolerant QC which is currently beyond technological
+capabilities. This motivates a search for alternative approaches to determine
+OTOCs and related quantities. In this study, we explore four parameterised sets
+of Hamiltonians describing local one-dimensional quantum systems of interest in
+condensed matter physics. For each set, we investigate whether classical kernel
+methods (KMs) can accurately learn the XZ-OTOC and a particular sum of OTOCs,
+as functions of the Hamiltonian parameters. We frame the problem as a
+regression task, generating small batches of labelled data with classical
+tensor network methods for quantum many-body systems with up to 40 qubits.
+Using this data, we train a variety of standard kernel machines and observe
+that the Laplacian and radial basis function (RBF) kernels perform best,
+achieving a coefficient of determination (\(R^2\)) on the testing sets of at
+least 0.7167, with averages between 0.8112 and 0.9822 for the various sets of
+Hamiltonians, together with small root mean squared error and mean absolute
+error. Hence, after training, the models can replace further uses of tensor
+networks for calculating an OTOC function of a system within the parameterised
+sets. Accordingly, the proposed method can assist with extensive evaluations of
+an OTOC function.
+
+---
+
+## Evaluating Variational Quantum Eigensolver and Quantum Dynamics Algorithms on the Advection-Diffusion Equation
+
+**Authors:** A. Barış Özgüler
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.24045v1
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+We investigate the potential of near-term quantum algorithms for solving
+partial differential equations (PDEs), focusing on a linear one-dimensional
+advection-diffusion equation as a test case. This study benchmarks a
+ground-state algorithm, Variational Quantum Eigensolver (VQE), against three
+leading quantum dynamics algorithms, Trotterization, Variational Quantum
+Imaginary Time Evolution (VarQTE), and Adaptive Variational Quantum Dynamics
+Simulation (AVQDS), applied to the same PDE on small quantum hardware. While
+Trotterization is fully quantum, VarQTE and AVQDS are variational algorithms
+that reduce circuit depth for noisy intermediate-scale quantum (NISQ) devices.
+However, hardware results from these dynamics methods show sizable errors due
+to noise and limited shot statistics. To establish a noise-free performance
+baseline, we implement the VQE-based solver on a noiseless statevector
+simulator. Our results show VQE can reach final-time infidelities as low as
+${O}(10^{-9})$ with $N=4$ qubits and moderate circuit depths, outperforming
+hardware-deployed dynamics methods that show infidelities $\gtrsim 10^{-2}$. By
+comparing noiseless VQE to shot-based and hardware-run algorithms, we assess
+their accuracy and resource demands, providing a baseline for future quantum
+PDE solvers. We conclude with a discussion of limitations and potential
+extensions to higher-dimensional, nonlinear PDEs relevant to engineering and
+finance.
+
+---
+
+## Undecidable problems associated with variational quantum algorithms
+
+**Authors:** Georgios Korpas, Vyacheslav Kungurtsev, Jakub Mareček
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.23723v1
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Variational Quantum Algorithms (VQAs), such as the Variational Quantum
+Eigensolver (VQE) and the Quantum Approximate Optimization Algorithm (QAOA),
+are widely studied as candidates for near-term quantum advantage. Recent work
+has shown that training VQAs is NP-hard in general. In this paper, we present a
+conditional result suggesting that the training of VQAs is undecidable, even in
+idealized, noiseless settings. We reduce the decision version of the digitized
+VQA training problem-where circuit parameters are drawn from a discrete set-to
+the question of whether a universal Diophantine equation (UDE) has a root. This
+reduction relies on encoding the UDE into the structure of a variational
+quantum circuit via the matrix exponentials. The central step involves
+establishing a correspondence between the objective function of the VQA and a
+known UDE of 58 variables and degree 4. Our main result is conditional on a
+natural conjecture: that a certain system of structured complex polynomial
+equations-arising from the inner product of a VQA circuit output and a fixed
+observable-has at least one solution. We argue this conjecture is plausible
+based on dimension-counting arguments (degrees of freedom in the Hamiltonians,
+state vector, and observable), and the generic solvability of such systems in
+algebraic geometry over the complex numbers. Under this assumption, we suggest
+that deciding whether a digitized VQA achieves a given energy threshold is
+undecidable. This links the limitations of variational quantum algorithms to
+foundational questions in mathematics and logic, extending the known landscape
+of quantum computational hardness to include uncomputability. Additionally, we
+establish an unconditional undecidability result for VQA convergence in open
+quantum systems.
+
+---
+
+## Choco-Q: Commute Hamiltonian-based QAOA for Constrained Binary Optimization
+
+**Authors:** Debin Xiang, Qifan Jiang, Liqiang Lu, Siwei Tan, Jianwei Yin
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.23941v1
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Constrained binary optimization aims to find an optimal assignment to
+minimize or maximize the objective meanwhile satisfying the constraints, which
+is a representative NP problem in various domains, including transportation,
+scheduling, and economy. Quantum approximate optimization algorithms (QAOA)
+provide a promising methodology for solving this problem by exploiting the
+parallelism of quantum entanglement. However, existing QAOA approaches based on
+penalty-term or Hamiltonian simulation fail to thoroughly encode the
+constraints, leading to extremely low success rate and long searching latency.
+  This paper proposes Choco-Q, a formal and universal framework for constrained
+binary optimization problems, which comprehensively covers all constraints and
+exhibits high deployability for current quantum devices. The main innovation of
+Choco-Q is to embed the commute Hamiltonian as the driver Hamiltonian,
+resulting in a much more general encoding formulation that can deal with
+arbitrary linear constraints. Leveraging the arithmetic features of commute
+Hamiltonian, we propose three optimization techniques to squeeze the overall
+circuit complexity, including Hamiltonian serialization, equivalent
+decomposition, and variable elimination. The serialization mechanism transforms
+the original Hamiltonian into smaller ones. Our decomposition methods only take
+linear time complexity, achieving end-to-end acceleration. Experiments
+demonstrate that Choco-Q shows more than 235$\times$ algorithmic improvement in
+successfully finding the optimal solution, and achieves 4.69$\times$ end-to-end
+acceleration, compared to prior QAOA designs.
+
+---
+
+## Decoherence-induced self-dual criticality in topological states of matter
+
+**Authors:** Qingyuan Wang, Romain Vasseur, Simon Trebst, Andreas W. W. Ludwig, Guo-Yi Zhu
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2502.14034v3
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Quantum measurements can be employed to induce decoherence in a restricted
+segment of a larger quantum many-body state, while generating entanglement for
+its remaining constituents. We demonstrate generally that measurement-induced
+phase transitions can be viewed as decoherence-induced critical mixed states.
+In this context, a deeper conceptual understanding is called for with regard to
+symmetry as an organizing principle. Integrating these connections we
+investigate the role of self-dual symmetry in mixed states, showing that the
+decoherence of electric (e) and magnetic (m) vortices from the 2D bulk of the
+toric code, or equivalently, a 2D cluster state with symmetry-protected
+topological order, can leave a (1+1)D quantum critical mixed state on the
+boundary protected by a weak Kramers-Wannier self-dual symmetry. The
+corresponding self-dual critical bulk is described by the $N\to1$ limit of the
+2D Non-linear Sigma Model in symmetry class D with target space SO(2N)/U(N) at
+$\Theta$-angle $\pi$, and represents a "measurement-version" of the Cho-Fisher
+network model subjected to Born-rule randomness. Explicit breaking of
+self-duality, by incoherent noise amounting to fermion interactions or
+(non-interacting) coherent deformation, is shown to induce an RG crossover from
+this self-dual critical state to Nishimori criticality or to it from a novel
+type of Ising+ criticality, respectively, both related to the random-bond Ising
+model in different replica limits. Using an unbiased numerical approach
+combining tensor network, Monte Carlo, and Gaussian fermion simulations, we
+chart out a global phase diagram as diagnosed by coherent information and
+entanglement entropy measures. Our results point to a way towards a general
+understanding of mixed-state criticality in open quantum systems in terms of
+symmetry and topology.
+
+---
+
+## Learning out-of-time-ordered correlators with classical kernel methods
+
+**Authors:** John Tanner, Jason Pye, Jingbo Wang
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2409.01592v2
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Out-of-Time Ordered Correlators (OTOCs) are widely used to investigate
+information scrambling in quantum systems. However, directly computing OTOCs
+with classical computers is an expensive procedure. This is due to the need to
+classically simulate the dynamics of quantum many-body systems, which entails
+computational costs that scale rapidly with system size. Similarly, exact
+simulation of the dynamics with a quantum computer (QC) will either only be
+possible for short times with noisy intermediate-scale quantum (NISQ) devices,
+or will require a fault-tolerant QC which is currently beyond technological
+capabilities. This motivates a search for alternative approaches to determine
+OTOCs and related quantities. In this study, we explore four parameterised sets
+of Hamiltonians describing local one-dimensional quantum systems of interest in
+condensed matter physics. For each set, we investigate whether classical kernel
+methods (KMs) can accurately learn the XZ-OTOC and a particular sum of OTOCs,
+as functions of the Hamiltonian parameters. We frame the problem as a
+regression task, generating small batches of labelled data with classical
+tensor network methods for quantum many-body systems with up to 40 qubits.
+Using this data, we train a variety of standard kernel machines and observe
+that the Laplacian and radial basis function (RBF) kernels perform best,
+achieving a coefficient of determination (\(R^2\)) on the testing sets of at
+least 0.7167, with averages between 0.8112 and 0.9822 for the various sets of
+Hamiltonians, together with small root mean squared error and mean absolute
+error. Hence, after training, the models can replace further uses of tensor
+networks for calculating an OTOC function of a system within the parameterised
+sets. Accordingly, the proposed method can assist with extensive evaluations of
+an OTOC function.
+
+---
+
+## Evaluating Variational Quantum Eigensolver and Quantum Dynamics Algorithms on the Advection-Diffusion Equation
+
+**Authors:** A. Barış Özgüler
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.24045v1
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+We investigate the potential of near-term quantum algorithms for solving
+partial differential equations (PDEs), focusing on a linear one-dimensional
+advection-diffusion equation as a test case. This study benchmarks a
+ground-state algorithm, Variational Quantum Eigensolver (VQE), against three
+leading quantum dynamics algorithms, Trotterization, Variational Quantum
+Imaginary Time Evolution (VarQTE), and Adaptive Variational Quantum Dynamics
+Simulation (AVQDS), applied to the same PDE on small quantum hardware. While
+Trotterization is fully quantum, VarQTE and AVQDS are variational algorithms
+that reduce circuit depth for noisy intermediate-scale quantum (NISQ) devices.
+However, hardware results from these dynamics methods show sizable errors due
+to noise and limited shot statistics. To establish a noise-free performance
+baseline, we implement the VQE-based solver on a noiseless statevector
+simulator. Our results show VQE can reach final-time infidelities as low as
+${O}(10^{-9})$ with $N=4$ qubits and moderate circuit depths, outperforming
+hardware-deployed dynamics methods that show infidelities $\gtrsim 10^{-2}$. By
+comparing noiseless VQE to shot-based and hardware-run algorithms, we assess
+their accuracy and resource demands, providing a baseline for future quantum
+PDE solvers. We conclude with a discussion of limitations and potential
+extensions to higher-dimensional, nonlinear PDEs relevant to engineering and
+finance.
+
+---
+
+## Undecidable problems associated with variational quantum algorithms
+
+**Authors:** Georgios Korpas, Vyacheslav Kungurtsev, Jakub Mareček
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.23723v1
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Variational Quantum Algorithms (VQAs), such as the Variational Quantum
+Eigensolver (VQE) and the Quantum Approximate Optimization Algorithm (QAOA),
+are widely studied as candidates for near-term quantum advantage. Recent work
+has shown that training VQAs is NP-hard in general. In this paper, we present a
+conditional result suggesting that the training of VQAs is undecidable, even in
+idealized, noiseless settings. We reduce the decision version of the digitized
+VQA training problem-where circuit parameters are drawn from a discrete set-to
+the question of whether a universal Diophantine equation (UDE) has a root. This
+reduction relies on encoding the UDE into the structure of a variational
+quantum circuit via the matrix exponentials. The central step involves
+establishing a correspondence between the objective function of the VQA and a
+known UDE of 58 variables and degree 4. Our main result is conditional on a
+natural conjecture: that a certain system of structured complex polynomial
+equations-arising from the inner product of a VQA circuit output and a fixed
+observable-has at least one solution. We argue this conjecture is plausible
+based on dimension-counting arguments (degrees of freedom in the Hamiltonians,
+state vector, and observable), and the generic solvability of such systems in
+algebraic geometry over the complex numbers. Under this assumption, we suggest
+that deciding whether a digitized VQA achieves a given energy threshold is
+undecidable. This links the limitations of variational quantum algorithms to
+foundational questions in mathematics and logic, extending the known landscape
+of quantum computational hardness to include uncomputability. Additionally, we
+establish an unconditional undecidability result for VQA convergence in open
+quantum systems.
+
+---
+
+## Choco-Q: Commute Hamiltonian-based QAOA for Constrained Binary Optimization
+
+**Authors:** Debin Xiang, Qifan Jiang, Liqiang Lu, Siwei Tan, Jianwei Yin
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.23941v1
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Constrained binary optimization aims to find an optimal assignment to
+minimize or maximize the objective meanwhile satisfying the constraints, which
+is a representative NP problem in various domains, including transportation,
+scheduling, and economy. Quantum approximate optimization algorithms (QAOA)
+provide a promising methodology for solving this problem by exploiting the
+parallelism of quantum entanglement. However, existing QAOA approaches based on
+penalty-term or Hamiltonian simulation fail to thoroughly encode the
+constraints, leading to extremely low success rate and long searching latency.
+  This paper proposes Choco-Q, a formal and universal framework for constrained
+binary optimization problems, which comprehensively covers all constraints and
+exhibits high deployability for current quantum devices. The main innovation of
+Choco-Q is to embed the commute Hamiltonian as the driver Hamiltonian,
+resulting in a much more general encoding formulation that can deal with
+arbitrary linear constraints. Leveraging the arithmetic features of commute
+Hamiltonian, we propose three optimization techniques to squeeze the overall
+circuit complexity, including Hamiltonian serialization, equivalent
+decomposition, and variable elimination. The serialization mechanism transforms
+the original Hamiltonian into smaller ones. Our decomposition methods only take
+linear time complexity, achieving end-to-end acceleration. Experiments
+demonstrate that Choco-Q shows more than 235$\times$ algorithmic improvement in
+successfully finding the optimal solution, and achieves 4.69$\times$ end-to-end
+acceleration, compared to prior QAOA designs.
+
+---
+
+## Decoherence-induced self-dual criticality in topological states of matter
+
+**Authors:** Qingyuan Wang, Romain Vasseur, Simon Trebst, Andreas W. W. Ludwig, Guo-Yi Zhu
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2502.14034v3
+**Published/Updated:** 2025-03-31
+
+**Abstract:**
+Quantum measurements can be employed to induce decoherence in a restricted
+segment of a larger quantum many-body state, while generating entanglement for
+its remaining constituents. We demonstrate generally that measurement-induced
+phase transitions can be viewed as decoherence-induced critical mixed states.
+In this context, a deeper conceptual understanding is called for with regard to
+symmetry as an organizing principle. Integrating these connections we
+investigate the role of self-dual symmetry in mixed states, showing that the
+decoherence of electric (e) and magnetic (m) vortices from the 2D bulk of the
+toric code, or equivalently, a 2D cluster state with symmetry-protected
+topological order, can leave a (1+1)D quantum critical mixed state on the
+boundary protected by a weak Kramers-Wannier self-dual symmetry. The
+corresponding self-dual critical bulk is described by the $N\to1$ limit of the
+2D Non-linear Sigma Model in symmetry class D with target space SO(2N)/U(N) at
+$\Theta$-angle $\pi$, and represents a "measurement-version" of the Cho-Fisher
+network model subjected to Born-rule randomness. Explicit breaking of
+self-duality, by incoherent noise amounting to fermion interactions or
+(non-interacting) coherent deformation, is shown to induce an RG crossover from
+this self-dual critical state to Nishimori criticality or to it from a novel
+type of Ising+ criticality, respectively, both related to the random-bond Ising
+model in different replica limits. Using an unbiased numerical approach
+combining tensor network, Monte Carlo, and Gaussian fermion simulations, we
+chart out a global phase diagram as diagnosed by coherent information and
+entanglement entropy measures. Our results point to a way towards a general
+understanding of mixed-state criticality in open quantum systems in terms of
+symmetry and topology.
+
+---
+
+## Learning out-of-time-ordered correlators with classical kernel methods
+
+**Authors:** John Tanner, Jason Pye, Jingbo Wang
+**Categories:** quant-ph, cs.LG, physics.comp-ph
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2409.01592v2
+**Published/Updated:** 2025-03-31
+**Matched Keywords:** tensor network
+
+**Abstract:**
+Out-of-Time Ordered Correlators (OTOCs) are widely used to investigate
+information scrambling in quantum systems. However, directly computing OTOCs
+with classical computers is an expensive procedure. This is due to the need to
+classically simulate the dynamics of quantum many-body systems, which entails
+computational costs that scale rapidly with system size. Similarly, exact
+simulation of the dynamics with a quantum computer (QC) will either only be
+possible for short times with noisy intermediate-scale quantum (NISQ) devices,
+or will require a fault-tolerant QC which is currently beyond technological
+capabilities. This motivates a search for alternative approaches to determine
+OTOCs and related quantities. In this study, we explore four parameterised sets
+of Hamiltonians describing local one-dimensional quantum systems of interest in
+condensed matter physics. For each set, we investigate whether classical kernel
+methods (KMs) can accurately learn the XZ-OTOC and a particular sum of OTOCs,
+as functions of the Hamiltonian parameters. We frame the problem as a
+regression task, generating small batches of labelled data with classical
+tensor network methods for quantum many-body systems with up to 40 qubits.
+Using this data, we train a variety of standard kernel machines and observe
+that the Laplacian and radial basis function (RBF) kernels perform best,
+achieving a coefficient of determination (\(R^2\)) on the testing sets of at
+least 0.7167, with averages between 0.8112 and 0.9822 for the various sets of
+Hamiltonians, together with small root mean squared error and mean absolute
+error. Hence, after training, the models can replace further uses of tensor
+networks for calculating an OTOC function of a system within the parameterised
+sets. Accordingly, the proposed method can assist with extensive evaluations of
+an OTOC function.
+
+---
+
+## Evaluating Variational Quantum Eigensolver and Quantum Dynamics Algorithms on the Advection-Diffusion Equation
+
+**Authors:** A. Barış Özgüler
+**Categories:** quant-ph, cs.CE, cs.ET
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.24045v1
+**Published/Updated:** 2025-03-31
+**Matched Keywords:** variational quantum eigensolver, vqe
+
+**Abstract:**
+We investigate the potential of near-term quantum algorithms for solving
+partial differential equations (PDEs), focusing on a linear one-dimensional
+advection-diffusion equation as a test case. This study benchmarks a
+ground-state algorithm, Variational Quantum Eigensolver (VQE), against three
+leading quantum dynamics algorithms, Trotterization, Variational Quantum
+Imaginary Time Evolution (VarQTE), and Adaptive Variational Quantum Dynamics
+Simulation (AVQDS), applied to the same PDE on small quantum hardware. While
+Trotterization is fully quantum, VarQTE and AVQDS are variational algorithms
+that reduce circuit depth for noisy intermediate-scale quantum (NISQ) devices.
+However, hardware results from these dynamics methods show sizable errors due
+to noise and limited shot statistics. To establish a noise-free performance
+baseline, we implement the VQE-based solver on a noiseless statevector
+simulator. Our results show VQE can reach final-time infidelities as low as
+${O}(10^{-9})$ with $N=4$ qubits and moderate circuit depths, outperforming
+hardware-deployed dynamics methods that show infidelities $\gtrsim 10^{-2}$. By
+comparing noiseless VQE to shot-based and hardware-run algorithms, we assess
+their accuracy and resource demands, providing a baseline for future quantum
+PDE solvers. We conclude with a discussion of limitations and potential
+extensions to higher-dimensional, nonlinear PDEs relevant to engineering and
+finance.
+
+---
+
+## Undecidable problems associated with variational quantum algorithms
+
+**Authors:** Georgios Korpas, Vyacheslav Kungurtsev, Jakub Mareček
+**Categories:** quant-ph
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.23723v1
+**Published/Updated:** 2025-03-31
+**Matched Keywords:** quantum approximate optimization algorithm, qaoa, vqe
+
+**Abstract:**
+Variational Quantum Algorithms (VQAs), such as the Variational Quantum
+Eigensolver (VQE) and the Quantum Approximate Optimization Algorithm (QAOA),
+are widely studied as candidates for near-term quantum advantage. Recent work
+has shown that training VQAs is NP-hard in general. In this paper, we present a
+conditional result suggesting that the training of VQAs is undecidable, even in
+idealized, noiseless settings. We reduce the decision version of the digitized
+VQA training problem-where circuit parameters are drawn from a discrete set-to
+the question of whether a universal Diophantine equation (UDE) has a root. This
+reduction relies on encoding the UDE into the structure of a variational
+quantum circuit via the matrix exponentials. The central step involves
+establishing a correspondence between the objective function of the VQA and a
+known UDE of 58 variables and degree 4. Our main result is conditional on a
+natural conjecture: that a certain system of structured complex polynomial
+equations-arising from the inner product of a VQA circuit output and a fixed
+observable-has at least one solution. We argue this conjecture is plausible
+based on dimension-counting arguments (degrees of freedom in the Hamiltonians,
+state vector, and observable), and the generic solvability of such systems in
+algebraic geometry over the complex numbers. Under this assumption, we suggest
+that deciding whether a digitized VQA achieves a given energy threshold is
+undecidable. This links the limitations of variational quantum algorithms to
+foundational questions in mathematics and logic, extending the known landscape
+of quantum computational hardness to include uncomputability. Additionally, we
+establish an unconditional undecidability result for VQA convergence in open
+quantum systems.
+
+---
+
+## Choco-Q: Commute Hamiltonian-based QAOA for Constrained Binary Optimization
+
+**Authors:** Debin Xiang, Qifan Jiang, Liqiang Lu, Siwei Tan, Jianwei Yin
+**Categories:** quant-ph
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2503.23941v1
+**Published/Updated:** 2025-03-31
+**Matched Keywords:** quantum approximate optimization algorithm, qaoa
+
+**Abstract:**
+Constrained binary optimization aims to find an optimal assignment to
+minimize or maximize the objective meanwhile satisfying the constraints, which
+is a representative NP problem in various domains, including transportation,
+scheduling, and economy. Quantum approximate optimization algorithms (QAOA)
+provide a promising methodology for solving this problem by exploiting the
+parallelism of quantum entanglement. However, existing QAOA approaches based on
+penalty-term or Hamiltonian simulation fail to thoroughly encode the
+constraints, leading to extremely low success rate and long searching latency.
+  This paper proposes Choco-Q, a formal and universal framework for constrained
+binary optimization problems, which comprehensively covers all constraints and
+exhibits high deployability for current quantum devices. The main innovation of
+Choco-Q is to embed the commute Hamiltonian as the driver Hamiltonian,
+resulting in a much more general encoding formulation that can deal with
+arbitrary linear constraints. Leveraging the arithmetic features of commute
+Hamiltonian, we propose three optimization techniques to squeeze the overall
+circuit complexity, including Hamiltonian serialization, equivalent
+decomposition, and variable elimination. The serialization mechanism transforms
+the original Hamiltonian into smaller ones. Our decomposition methods only take
+linear time complexity, achieving end-to-end acceleration. Experiments
+demonstrate that Choco-Q shows more than 235$\times$ algorithmic improvement in
+successfully finding the optimal solution, and achieves 4.69$\times$ end-to-end
+acceleration, compared to prior QAOA designs.
+
+---
+
+## Decoherence-induced self-dual criticality in topological states of matter
+
+**Authors:** Qingyuan Wang, Romain Vasseur, Simon Trebst, Andreas W. W. Ludwig, Guo-Yi Zhu
+**Categories:** quant-ph, cond-mat.dis-nn, cond-mat.stat-mech, cond-mat.str-el
+**Source:** arxiv
+**URL:** http://arxiv.org/abs/2502.14034v3
+**Published/Updated:** 2025-03-31
+**Matched Keywords:** tensor network
+
+**Abstract:**
+Quantum measurements can be employed to induce decoherence in a restricted
+segment of a larger quantum many-body state, while generating entanglement for
+its remaining constituents. We demonstrate generally that measurement-induced
+phase transitions can be viewed as decoherence-induced critical mixed states.
+In this context, a deeper conceptual understanding is called for with regard to
+symmetry as an organizing principle. Integrating these connections we
+investigate the role of self-dual symmetry in mixed states, showing that the
+decoherence of electric (e) and magnetic (m) vortices from the 2D bulk of the
+toric code, or equivalently, a 2D cluster state with symmetry-protected
+topological order, can leave a (1+1)D quantum critical mixed state on the
+boundary protected by a weak Kramers-Wannier self-dual symmetry. The
+corresponding self-dual critical bulk is described by the $N\to1$ limit of the
+2D Non-linear Sigma Model in symmetry class D with target space SO(2N)/U(N) at
+$\Theta$-angle $\pi$, and represents a "measurement-version" of the Cho-Fisher
+network model subjected to Born-rule randomness. Explicit breaking of
+self-duality, by incoherent noise amounting to fermion interactions or
+(non-interacting) coherent deformation, is shown to induce an RG crossover from
+this self-dual critical state to Nishimori criticality or to it from a novel
+type of Ising+ criticality, respectively, both related to the random-bond Ising
+model in different replica limits. Using an unbiased numerical approach
+combining tensor network, Monte Carlo, and Gaussian fermion simulations, we
+chart out a global phase diagram as diagnosed by coherent information and
+entanglement entropy measures. Our results point to a way towards a general
+understanding of mixed-state criticality in open quantum systems in terms of
+symmetry and topology.
+
+---
+

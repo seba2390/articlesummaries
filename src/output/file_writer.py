@@ -23,18 +23,23 @@ class FileWriter(BaseOutput):
     def __init__(self):
         """Initializes FileWriter with no output file configured yet."""
         self.output_file: str | None = None
+        self.output_format: str = "plain"  # Default format
+        self.include_confidence: bool = False
+        self.include_explanation: bool = False
 
     def configure(self, config: Dict[str, Any]):
-        """Configures the FileWriter with the target output file path.
-
-        Expects an 'output_file' key in the config dictionary.
-        If not present, defaults to `DEFAULT_FILENAME`.
+        """Configures the FileWriter from the 'output' section of the config.
 
         Args:
-            config: The configuration dictionary.
+            config: The 'output' dictionary from the main configuration.
+                    Expected keys: 'file', 'format', 'include_confidence',
+                    'include_explanation'.
         """
-        self.output_file = config.get("output_file", self.DEFAULT_FILENAME)
-        logger.info(f"FileWriter configured. Output will be appended to: '{self.output_file}'")
+        self.output_file = config.get("file", self.DEFAULT_FILENAME)
+        self.output_format = config.get("format", "plain").lower()
+        self.include_confidence = config.get("include_confidence", False)
+        self.include_explanation = config.get("include_explanation", False)
+        logger.info(f"FileWriter configured. Output file: '{self.output_file}', Format: {self.output_format}")
 
     def output(self, papers: List[Paper]):
         """Appends the details of the provided papers to the configured file.
@@ -57,32 +62,62 @@ class FileWriter(BaseOutput):
 
         logger.info(f"Attempting to append {len(papers)} papers to '{self.output_file}'...")
         try:
-            # Open in append mode ('a'), create if doesn't exist.
-            # Specify UTF-8 encoding for broad compatibility.
             with open(self.output_file, "a", encoding="utf-8") as f:
-                # Write a header for this batch of papers
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                f.write(f"--- Relevant Papers Found on {timestamp} ---\n\n")
+                if self.output_format != "markdown":  # Add header for plain text
+                    f.write(f"--- Relevant Papers Found on {timestamp} ---\n\n")
 
-                # Write details for each paper
                 for paper in papers:
-                    f.write(f"ID: {paper.id}\n")
-                    f.write(f"Source: {paper.source}\n")
-                    f.write(f"Title: {paper.title}\n")
-                    # Format authors nicely, handle empty list
+                    categories_str = ", ".join(paper.categories) if paper.categories else "N/A"
+                    matched_kw_str = ", ".join(paper.matched_keywords) if paper.matched_keywords else "N/A"
                     authors_str = ", ".join(paper.authors) if paper.authors else "N/A"
-                    f.write(f"Authors: {authors_str}\n")
-                    # Format date, handle potential None
                     published_str = (
                         paper.published_date.strftime("%Y-%m-%d %H:%M:%S %Z") if paper.published_date else "N/A"
                     )
-                    f.write(f"Updated/Published: {published_str}\n")
-                    f.write(f"URL: {paper.url}\n")
-                    # Clean up abstract newlines for single-line representation in the file
                     abstract_cleaned = (
                         str(paper.abstract).replace("\n", " ").replace("\r", "") if paper.abstract else "N/A"
                     )
-                    f.write(f"Abstract: {abstract_cleaned}\n\n")
+
+                    if self.output_format == "markdown":
+                        f.write(f"## {paper.title}\n\n")
+                        f.write(f"**Authors:** {authors_str}\n")
+                        f.write(f"**Categories:** {categories_str}\n")
+                        f.write(f"**Source:** {paper.source}\n")
+                        f.write(f"**URL:** {paper.url}\n")
+                        published_md_str = paper.published_date.strftime("%Y-%m-%d") if paper.published_date else "N/A"
+                        f.write(f"**Published/Updated:** {published_md_str}\n")
+                        if paper.matched_keywords:
+                            f.write(f"**Matched Keywords:** {matched_kw_str}\n")
+                        f.write(f"\n**Abstract:**\n{paper.abstract if paper.abstract else 'N/A'}\n\n")
+                        if self.include_confidence and paper.relevance:
+                            confidence_val = paper.relevance.get("confidence", "N/A")
+                            try:
+                                f.write(f"**Relevance Confidence:** {float(confidence_val):.2f}\n")
+                            except (ValueError, TypeError):
+                                f.write(f"**Relevance Confidence:** {confidence_val}\n")
+                        if self.include_explanation and paper.relevance:
+                            f.write(f"**Relevance Explanation:**\n{paper.relevance.get('explanation', 'N/A')}\n")
+                        f.write("---\n\n")
+                    else:  # Plain text format
+                        f.write(f"ID: {paper.id}\n")
+                        f.write(f"Source: {paper.source}\n")
+                        f.write(f"Title: {paper.title}\n")
+                        f.write(f"Authors: {authors_str}\n")
+                        f.write(f"Categories: {categories_str}\n")
+                        f.write(f"Updated/Published: {published_str}\n")
+                        f.write(f"URL: {paper.url}\n")
+                        if paper.matched_keywords:
+                            f.write(f"Matched Keywords: {matched_kw_str}\n")
+                        f.write(f"Abstract: {abstract_cleaned}\n")
+                        if self.include_confidence and paper.relevance:
+                            confidence_val = paper.relevance.get("confidence", "N/A")
+                            try:
+                                f.write(f"Relevance Confidence: {float(confidence_val):.2f}\n")
+                            except (ValueError, TypeError):
+                                f.write(f"Relevance Confidence: {confidence_val}\n")
+                        if self.include_explanation and paper.relevance:
+                            f.write(f"Relevance Explanation: {paper.relevance.get('explanation', 'N/A')}\n")
+                        f.write("\n" + "=" * 80 + "\n\n")
 
                 logger.info(f"Successfully appended {len(papers)} papers to '{self.output_file}'")
 

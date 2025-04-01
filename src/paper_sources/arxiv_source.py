@@ -1,10 +1,13 @@
 """Implementation of the paper source fetching papers from the arXiv API."""
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
 from typing import Any, Dict, List
 
 import arxiv
+from tqdm import tqdm
 
 from src.paper import Paper
 from src.paper_sources.base_source import BasePaperSource
@@ -24,18 +27,23 @@ class ArxivSource(BasePaperSource):
     def __init__(self):
         """Initializes ArxivSource with default configuration values."""
         self.categories: List[str] = []
-        self.max_total_results: int = 500  # Default safeguard limit
+        self.max_total_results: int = 5000  # Default safeguard limit
 
     def configure(self, config: Dict[str, Any]):
         """Configures the ArxivSource instance from the application config.
 
         Args:
-            config: The configuration dictionary, expected to contain
-                    'categories' (list of str) and optionally
-                    'max_total_results' (int).
+            config: The configuration dictionary. Reads:
+                    - config['paper_source']['arxiv']['categories']
+                    - config['max_total_results'] (top-level)
         """
-        self.categories = config.get("categories", [])
+        # Read categories from nested config
+        arxiv_config = config.get("paper_source", {}).get("arxiv", {})
+        self.categories = arxiv_config.get("categories", [])
+
+        # Read max_total_results from top-level config
         self.max_total_results = config.get("max_total_results", 500)
+
         if not self.categories:
             # Log warning if no categories are provided, as fetch will do nothing
             logger.warning("ArxivSource configured with no categories. No papers will be fetched.")
@@ -44,100 +52,91 @@ class ArxivSource(BasePaperSource):
         logger.info(f"Maximum total results to fetch per run: {self.max_total_results}")
 
     def fetch_papers(self) -> List[Paper]:
-        """Fetches papers submitted/updated in the last 24 hours from arXiv.
-
-        Constructs a query for the configured categories, requests up to
-        `max_total_results` sorted by submission date from the arXiv API,
-        filters these results to keep only those with an 'updated' timestamp
-        within the last 24 hours (UTC), ensures uniqueness by paper ID (preferring
-        the first version encountered), and converts them to `Paper` objects.
-
-        Returns:
-            A list of unique `Paper` objects submitted/updated in the last 24 hours,
-            or an empty list if no matching papers are found or an API error occurs.
-        """
+        """Fetches papers last updated on the previous calendar day (UTC)."""
         if not self.categories:
             logger.info("Skipping fetch: No arXiv categories configured.")
             return []
 
-        # --- Construct the category part of the query ---
-        # Example: "(cat:cs.AI OR cat:cs.LG)"
+        # --- Calculate previous day's date range in UTC ---
+        today_utc = datetime.now(timezone.utc).date()
+        yesterday_utc = today_utc - timedelta(days=1)
+        start_dt_utc = datetime.combine(yesterday_utc, dt_time.min, tzinfo=timezone.utc)
+        end_dt_utc = datetime.combine(yesterday_utc, dt_time.max, tzinfo=timezone.utc)
+        # Format for arXiv API query (YYYYMMDDHHMMSS)
+        start_str = start_dt_utc.strftime("%Y%m%d%H%M%S")
+        end_str = end_dt_utc.strftime("%Y%m%d%H%M%S")
+        date_query = f"lastUpdatedDate:[{start_str} TO {end_str}]"
+        logger.info(f"Querying arXiv for papers updated on: {yesterday_utc.strftime('%Y-%m-%d')} UTC")
+
+        # --- Construct the full query ---
         category_query = " OR ".join([f"cat:{cat}" for cat in self.categories])
-        search_query = f"({category_query})"
-        # Note: We don't add date to the query string itself. Instead, we fetch
-        # the most recent N papers and filter by date locally. This is generally
-        # more reliable with the arXiv API than complex date range queries.
+        search_query = f"({category_query}) AND {date_query}"
+        logger.debug(f"Constructed arXiv query: {search_query}")
 
-        logger.info(f"Querying arXiv for categories: {self.categories}")
-        logger.info(f"Fetching up to {self.max_total_results} most recently submitted/updated papers.")
+        logger.info(f"Fetching up to {self.max_total_results} papers from arXiv (querying specific date range)...")
+        fetch_start_time = time.time()
 
+        # Temporarily silence verbose arxiv library logging
+        arxiv_logger = logging.getLogger("arxiv")
+        original_level = arxiv_logger.level
+        arxiv_logger.setLevel(logging.WARNING)
+
+        fetched_results: List[arxiv.Result] = []
         try:
-            # Perform the search, sorting by submission date to get newest first
+            # Perform the search - remove sort_by as date range is primary filter
             search = arxiv.Search(
                 query=search_query,
                 max_results=self.max_total_results,
-                sort_by=arxiv.SortCriterion.SubmittedDate,
+                # sort_by=arxiv.SortCriterion.SubmittedDate, # Removed
             )
-
-            # Execute the search and fetch results. Convert generator to list.
-            # This might take some time depending on network and API response.
             results_generator = search.results()
-            fetched_results: List[arxiv.Result] = list(results_generator)
 
-            logger.info(f"arXiv API returned {len(fetched_results)} papers (sorted by submission date). ")
-            # Log a warning if we hit the configured limit, as there might be more papers.
-            if len(fetched_results) == self.max_total_results:
-                logger.warning(
-                    f"Reached the fetch limit ({self.max_total_results}). Some papers submitted/updated today might have been missed."
-                )
-
-            # --- Filter results by 'updated' date (last 24 hours) and uniqueness ---
-            # Use timezone-aware datetime for comparison
-            cutoff_datetime_utc = datetime.now(timezone.utc) - timedelta(days=1)
-            papers_in_window = []
-            seen_ids = set()
-
-            for result in fetched_results:
-                # Use the 'updated' field, as it reflects the last modification time (incl. new versions)
-                paper_time_utc = result.updated
-                # Ensure the result has a valid timezone-aware datetime
-                if not isinstance(paper_time_utc, datetime) or paper_time_utc.tzinfo is None:
-                    logger.warning(
-                        f"Skipping paper {result.entry_id}: Missing or non-timezone-aware 'updated' date: {paper_time_utc}"
-                    )
-                    continue  # Skip if date is invalid or naive
-
-                paper_id = result.get_short_id()
-
-                # Check if updated within the last 24 hours AND if ID is unique
-                if paper_time_utc >= cutoff_datetime_utc and paper_id not in seen_ids:
-                    papers_in_window.append(result)
-                    seen_ids.add(paper_id)  # Add ID to prevent duplicates (e.g., v1, v2 of same paper ID base)
-
-            logger.info(f"Filtered down to {len(papers_in_window)} unique papers updated in the last 24 hours.")
-
-            # --- Convert valid arXiv results to our internal Paper format ---
-            papers = [
-                Paper(
-                    id=result.get_short_id(),
-                    title=result.title,
-                    authors=[str(a) for a in result.authors],
-                    abstract=result.summary,
-                    url=result.entry_id,
-                    published_date=result.updated,  # Store the 'updated' date
-                    source="arxiv",
-                )
-                for result in papers_in_window
-            ]
-            return papers
+            # Use tqdm to show progress while iterating through the generator
+            logger.info("Processing results from arXiv API...")  # Log before tqdm
+            fetched_results = list(tqdm(results_generator, desc="Fetching arXiv results", unit=" papers", leave=False))
 
         except arxiv.UnexpectedEmptyPageError as e:
-            # Handle specific arxiv library error for potentially transient issues
-            logger.warning(
-                f"arXiv API returned an unexpected empty page during search. This might be transient. Error: {e}"
-            )
-            return []
+            logger.warning(f"arXiv API returned an unexpected empty page during search. Error: {e}")
         except Exception as e:
-            # Catch broader exceptions during API interaction or processing
-            logger.error(f"An error occurred while fetching or processing papers from arXiv: {e}", exc_info=True)
-            return []
+            logger.error(f"An error occurred while fetching papers from arXiv: {e}", exc_info=True)
+        finally:
+            arxiv_logger.setLevel(original_level)
+
+        duration = time.time() - fetch_start_time
+        logger.info(
+            f"-> arXiv API fetch completed in {duration:.2f} seconds, received {len(fetched_results)} papers for the specified date range."
+        )
+
+        if len(fetched_results) >= self.max_total_results:
+            # Note: >= because max_results is not an exact guarantee with the API
+            logger.warning(
+                f"Reached or exceeded the fetch limit ({self.max_total_results}). Some papers from {yesterday_utc.strftime('%Y-%m-%d')} might have been missed."
+            )
+
+        # --- Process and deduplicate results (Date filtering is now done by API query) ---
+        papers_processed = []
+        seen_ids = set()
+        for result in fetched_results:
+            paper_id = result.get_short_id()
+            if paper_id not in seen_ids:
+                papers_processed.append(result)
+                seen_ids.add(paper_id)
+            # else: logger.debug(f"Skipping duplicate paper ID: {paper_id}") # Optional debug
+
+        logger.info(f"Found {len(papers_processed)} unique papers from the target date.")
+
+        # --- Convert valid arXiv results to our internal Paper format ---
+        papers = [
+            Paper(
+                id=result.get_short_id(),
+                title=result.title,
+                authors=[str(a) for a in result.authors],
+                abstract=result.summary,
+                url=result.entry_id,
+                published_date=result.updated,
+                source="arxiv",
+                categories=result.categories,
+            )
+            for result in papers_processed
+        ]
+        return papers

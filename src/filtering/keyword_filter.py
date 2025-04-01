@@ -23,53 +23,43 @@ class KeywordFilter(BaseFilter):
     def configure(self, config: Dict[str, Any]):
         """Configures the filter with keywords from the application config.
 
-        Expects a 'keywords' key in the config dictionary containing a list
-        of strings. Keywords are stored internally in lowercase.
-
         Args:
-            config: The configuration dictionary.
+            config: The configuration dictionary. Reads keywords from:
+                    config['paper_source']['arxiv']['keywords']
         """
-        # Extract keywords, default to empty list, ensure lowercase
-        self.keywords = [str(kw).lower() for kw in config.get("keywords", [])]
+        # Read keywords from the nested arxiv source config
+        arxiv_config = config.get("paper_source", {}).get("arxiv", {})
+        keywords_raw = arxiv_config.get("keywords", [])
+
+        # Convert all keywords to lowercase for case-insensitive matching
+        self.keywords = [str(kw).lower() for kw in keywords_raw]
+
         if not self.keywords:
-            logger.warning("KeywordFilter configured with no keywords. Filter will pass all papers.")
+            logger.warning(
+                "KeywordFilter configured with no keywords. All papers will be considered irrelevant by this filter."
+            )
         else:
-            logger.info(f"KeywordFilter configured with {len(self.keywords)} keywords: {self.keywords}")
+            logger.info(f"KeywordFilter configured with keywords: {self.keywords}")
 
     def filter(self, papers: List[Paper]) -> List[Paper]:
-        """Filters papers based on keyword matches.
-
-        Iterates through the provided list of papers. A paper is considered
-        relevant if its title or abstract contains any of the configured keywords
-        (case-insensitive comparison).
-
-        Args:
-            papers: The list of `Paper` objects to filter.
-
-        Returns:
-            A list of `Paper` objects that contain at least one keyword.
-            Returns the original list if no keywords are configured.
-        """
-        # If no keywords are set, filtering is effectively disabled
+        """Filters a list of papers based on keyword presence and stores matched keywords."""
         if not self.keywords:
-            logger.warning("Keyword filtering skipped: No keywords are configured.")
-            return papers
+            logger.info("KeywordFilter has no keywords configured, returning empty list.")
+            return []
 
         relevant_papers = []
-        logger.debug(f"Applying keyword filter ({len(self.keywords)} keywords) to {len(papers)} papers.")
+        logger.info(f"Filtering {len(papers)} papers using keywords: {self.keywords}")
         for paper in papers:
-            # Combine title and abstract for searching, convert to lowercase
-            # Handle potential None values for title/abstract gracefully
-            title = str(paper.title).lower() if paper.title else ""
-            abstract = str(paper.abstract).lower() if paper.abstract else ""
-            text_to_check = title + " " + abstract
+            title_lower = str(paper.title).lower() if paper.title else ""
+            abstract_lower = str(paper.abstract).lower() if paper.abstract else ""
+            text_to_search = title_lower + " " + abstract_lower
 
-            # Check if any configured keyword is present
-            if any(keyword in text_to_check for keyword in self.keywords):
+            # Find which keywords match
+            matched = [kw for kw in self.keywords if kw in text_to_search]
+
+            if matched:
+                paper.matched_keywords = matched  # Store matched keywords
                 relevant_papers.append(paper)
-                # Debug log for matched papers can be useful
-                logger.debug(f"  Match found: Paper ID {paper.id} ('{paper.title[:50]}...') contains keyword.")
 
-        # Log summary of filtering results
-        logger.info(f"Keyword filtering complete: {len(relevant_papers)} papers matched out of {len(papers)}.")
+        logger.info(f"Found {len(relevant_papers)} papers matching keywords.")
         return relevant_papers

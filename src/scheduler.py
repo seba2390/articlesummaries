@@ -12,7 +12,28 @@ from typing import Any, Callable, Dict
 
 import schedule
 
+# Set up logger for this module first
 logger = logging.getLogger(__name__)
+
+# Try importing timezone utilities
+try:
+    # Use zoneinfo available in Python 3.9+
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    _pytz_available = False
+except ImportError:
+    try:
+        # Fallback to pytz if available
+        from pytz import UnknownTimeZoneError as ZoneInfoNotFoundError
+        from pytz import timezone as ZoneInfo
+
+        _pytz_available = True
+        logger.info("Using pytz for timezone support.")
+    except ImportError:
+        ZoneInfo = None
+        ZoneInfoNotFoundError = Exception  # Base Exception for except block
+        _pytz_available = False
+        logger.warning("Neither zoneinfo (Python 3.9+) nor pytz found. Timezone support is disabled.")
 
 
 class Scheduler:
@@ -22,16 +43,41 @@ class Scheduler:
         """Initializes the Scheduler.
 
         Args:
-            config: The application configuration dictionary, expected to contain
-                    'run_time_daily' for scheduling.
+            config: The application configuration dictionary. Reads:
+                    - config['schedule']['run_time']
+                    - config['schedule']['timezone'] (optional)
             job_func: The function (job) to be scheduled and executed.
-                      This function should ideally handle its own exceptions.
         """
         self.config = config
         self.job_func = job_func
-        # Default to 08:00 if not specified in config
-        self.run_time = config.get("run_time_daily", "08:00")
-        logger.info(f"Scheduler initialized. Daily run time: {self.run_time}")
+
+        schedule_config = config.get("schedule", {})
+        self.run_time = schedule_config.get("run_time", "08:00")  # Default to 08:00
+        self.timezone_str = schedule_config.get("timezone")
+        # self.timezone_info = None # Removed, schedule library handles tz string directly
+
+        # Validate timezone string if provided and library exists
+        if self.timezone_str and ZoneInfo:
+            try:
+                # Attempt to load the timezone to check validity
+                _ = ZoneInfo(self.timezone_str)
+                logger.info(f"Scheduler will use timezone: {self.timezone_str}")
+            except ZoneInfoNotFoundError:
+                logger.error(
+                    f"Invalid timezone '{self.timezone_str}' specified in config. Falling back to system local time."
+                )
+                self.timezone_str = None  # Clear invalid timezone
+            except Exception as e:
+                logger.error(f"Error loading timezone '{self.timezone_str}': {e}. Falling back to system local time.")
+                self.timezone_str = None
+        elif self.timezone_str:
+            logger.warning(
+                "Timezone specified in config, but timezone library (zoneinfo/pytz) not available. Using system local time."
+            )
+            self.timezone_str = None  # Cannot use it if library missing
+
+        tz_msg = f" ({self.timezone_str})" if self.timezone_str else " (local time)"
+        logger.info(f"Scheduler initialized. Daily run time: {self.run_time}{tz_msg}")
 
     def run(self):
         """Sets up the daily schedule and runs the main execution loop.
@@ -41,14 +87,28 @@ class Scheduler:
         periodically checking for and running pending scheduled jobs.
         The loop continues until interrupted (e.g., by KeyboardInterrupt).
         """
-        logger.info(f"Scheduling job to run daily at {self.run_time}...")
+        logger.info(
+            f"Scheduling job to run daily at {self.run_time}{' (' + self.timezone_str + ')' if self.timezone_str else ' (local time)'}..."
+        )
         try:
-            schedule.every().day.at(self.run_time).do(self.job_func)
+            # Pass the timezone string directly to schedule if available
+            schedule.every().day.at(self.run_time, self.timezone_str).do(self.job_func)
             logger.info("Job scheduled successfully.")
+        except TypeError as e:
+            # Handle potential TypeError if schedule doesn't support tz parameter (older versions?)
+            if "unexpected keyword argument 'tz'" in str(e) or "got an unexpected keyword argument 'tzinfo'" in str(e):
+                logger.warning(
+                    f"Installed 'schedule' library version might not support timezones. Scheduling in local time for {self.run_time}."
+                )
+                schedule.every().day.at(self.run_time).do(self.job_func)
+            else:
+                logger.error(f"TypeError scheduling job at '{self.run_time}': {e}", exc_info=True)
+                logger.error("Scheduler cannot start. Exiting.")
+                return
         except Exception as e:
             logger.error(f"Failed to schedule job at '{self.run_time}'. Error: {e}", exc_info=True)
             logger.error("Scheduler cannot start. Exiting.")
-            return  # Cannot proceed if scheduling fails
+            return
 
         # Optional: Run once immediately on startup.
         # Consider making this behavior configurable in config.yaml.
@@ -77,15 +137,26 @@ class Scheduler:
 
                 if isinstance(next_run_candidate, datetime):
                     next_run_time: datetime = next_run_candidate
-                    now = datetime.now()
+                    # Use schedule.get_jobs() to get timezone info if needed for comparison
+                    # Or rely on schedule library internal comparison
+                    now = datetime.now()  # Use local time for comparison logic for simplicity
+                    # More robust: Use timezone-aware now if next_run is aware
+                    # if next_run_time.tzinfo:
+                    #    now = datetime.now(next_run_time.tzinfo)
+
                     # Calculate time until next run in seconds
                     wait_seconds = (next_run_time - now).total_seconds()
 
-                    # Sleep for half the duration until the next job,
-                    # but at least 1 second and at most the default 60 seconds.
-                    calculated_sleep = max(1, wait_seconds / 2)
-                    sleep_duration = min(calculated_sleep, 60)
-                    logger.debug(f"Next job at {next_run_time}. Sleeping for {sleep_duration:.1f}s.")
+                    if wait_seconds > 0:
+                        # Sleep for half the duration until the next job,
+                        # but at least 1 second and at most the default 60 seconds.
+                        calculated_sleep = max(1, wait_seconds / 2)
+                        sleep_duration = min(calculated_sleep, 60)
+                        logger.debug(f"Next job at {next_run_time}. Sleeping for {sleep_duration:.1f}s.")
+                    else:
+                        # Job is due or overdue, check more frequently
+                        sleep_duration = 1
+                        logger.debug("Next job is due or overdue. Sleeping for 1s.")
                 else:
                     # No jobs scheduled or next_run is not a datetime
                     logger.debug(f"No upcoming scheduled job found. Sleeping for default {sleep_duration}s.")

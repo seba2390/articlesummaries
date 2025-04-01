@@ -1,42 +1,47 @@
-# ArXiv categories to search (e.g., cs.AI, cs.LG, math.AP)
-# Find categories here: https://arxiv.org/category_taxonomy
-categories:
-  - "cs.AI"
-  - "cs.LG"
-  - "stat.ML"
-
-# Filtering criteria
-# Option 1: List of keywords (case-insensitive)
-# If any keyword is found in the title or abstract, the paper is considered relevant.
-keywords:
-  - "transformer"
-  - "diffusion model"
-  - "reinforcement learning"
-
-# Option 2: A subject prompt (more advanced, requires NLP approach - not implemented by default)
-# subject_prompt: "Papers discussing novel methods for large language model alignment."
+# Configuration file for arXiv Paper Monitor
 
 # Maximum total number of papers to fetch across all categories in a single run.
 # This acts as a safeguard if the number of papers published today is very large.
-max_total_results: 500
+max_total_results: 1000
 
-# Time of day to run the check (HH:MM format, 24-hour clock)
-run_time_daily: "08:00"
-
-# File to store relevant papers (optional, creates if it doesn't exist)
-output_file: "relevant_papers.txt"
+# --- Relevance Checking Method ---
+# Determines the overall method used for checking paper relevance.
+# Options: "keyword" or "llm"
+relevance_checking_method: "keyword"
 
 # Paper source configuration
 paper_source:
   type: "arxiv"  # Options: arxiv
   arxiv:
-    categories: ["cs.AI", "cs.LG", "cs.CL"]  # arXiv categories to monitor
-    keywords: ["large language model", "transformer", "attention"]  # Keywords to filter papers
+    categories: [  # ArXiv categories to search - find categories here: https://arxiv.org/category_taxonomy
+                  "math-ph",          # Mathematical Physics
+                  "physics.atm-clus", # Atomic and Molecular Clusters
+                  "physics.comp-ph",  # Computational Physics
+                  "quant-ph",         # Quantum Physics
+                  "physics.data-an",  # Data Analysis, Statistics and Probability
+                  "math.IT",          # Information Theory
+                  "math.NA",          # Numerical Analysis
+                  "math.OC",          # Optimization and Control
+                  "cs.AI",            # Artificial Intelligence
+                  "cs.CE",            # Computational Engineering, Finance, and Science
+                  "cs.IT",            # Information Theory
+                  "cs.LG"             # Machine Learning
+                ]
+    # arXiv categories to monitor
+    keywords: [ # Keywords to filter papers (case insensitive)
+               "tensor network",
+               "quantum circuit simulation",
+               "expectation value estimation",
+               "contraction path",
+               "Quantum Approximate Optimization Algorithm",
+               "QAOA",
+               "variational quantum eigensolver",
+               "VQE",
+               ]
     fetch_window: 24  # Hours to look back for papers
 
-# Relevance checking configuration
+# Relevance checker specific settings (used depending on relevance_checking_method)
 relevance_checker:
-  type: "keyword"  # Options: keyword, llm
   llm:
     provider: "groq"  # Options: groq, custom
     api_key: ""  # Your Groq API key (optional if using custom provider)

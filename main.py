@@ -11,16 +11,13 @@ This script orchestrates the application flow:
 import logging
 import sys
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
-
-import schedule
+from typing import Any, Dict, List, Optional
 
 from src.config_loader import load_config
 from src.filtering.keyword_filter import KeywordFilter
 from src.llm import GroqChecker
 from src.output.file_writer import FileWriter
+from src.paper import Paper
 from src.paper_sources.arxiv_source import ArxivSource
 from src.scheduler import Scheduler
 
@@ -47,117 +44,96 @@ def print_separator(char="=", length=70):
 
 
 # --- Main Job Definition ---
-def main_job(config):
-    """The core job function executed by the scheduler.
-
-    This function performs one complete cycle of fetching, filtering, and outputting
-    papers based on the provided configuration.
-
-    Steps:
-    1. Instantiates the paper source (ArxivSource), filter (KeywordFilter),
-       and output handler (FileWriter).
-    2. Configures each component using the global configuration dictionary.
-    3. Executes the workflow: fetch -> filter -> output.
-    4. Logs progress and results for each step.
-
-    Args:
-        config: The loaded application configuration dictionary.
-    """
-    run_start_time = datetime.now()
-    print_separator()
-    logger.info("🚀 Starting Daily Paper Check...")
-    print_separator()
-
-    # --- Instantiate components ---
-    logger.debug("Instantiating components: ArxivSource, KeywordFilter, FileWriter")
+def check_papers(config: Dict[str, Any]) -> None:
+    """Check for new relevant papers."""
     try:
-        # Revert to single ArxivSource
-        paper_source = ArxivSource()
-        paper_filter = KeywordFilter()
-        output_handler = FileWriter()
-    except Exception as e:
-        logger.error(f"Fatal error instantiating components: {e}", exc_info=True)
-        logger.error("Job cannot proceed.")
-        return
+        source = ArxivSource()
+        source.configure(config)
 
-    # --- Configure components ---
-    logger.debug("Configuring components...")
-    try:
-        paper_source.configure(config)
-        paper_filter.configure(config)
-        output_handler.configure(config)
-        logger.debug("Components configured successfully.")
-    except KeyError as e:
-        logger.error(f"Configuration error during component setup: Missing key '{e}'")
-        logger.error("Job cannot proceed due to configuration error.")
-        return
-    except Exception as e:
-        logger.error(f"Unexpected error configuring components: {e}", exc_info=True)
-        logger.error("Job cannot proceed due to configuration error.")
-        return
+        # Explicitly log configured keywords for keyword checking
+        try:
+            # Read keywords from the nested arxiv source config for logging
+            arxiv_config = config.get("paper_source", {}).get("arxiv", {})
+            keywords_for_logging = arxiv_config.get("keywords", [])
+            if keywords_for_logging:
+                logger.info(f"Keyword checking configured with keywords: {keywords_for_logging}")
+            else:
+                logger.info("Keyword checking is configured with no keywords.")
+        except Exception as e:
+            logger.warning(f"Could not read or log keywords from config: {e}")
 
-    # --- Execute workflow ---
-    try:
-        # 1. Fetching Papers
-        print_separator("-")
-        logger.info("🔎 Fetching papers...")
-        fetch_start_time = datetime.now()
-        # Fetch from single source
-        papers = paper_source.fetch_papers()
-        fetch_duration = datetime.now() - fetch_start_time
-        # Revert log message logic
+        # Determine checking method from top-level config
+        checking_method = config.get("relevance_checking_method", "keyword").lower()  # Default to keyword
+
+        llm_checker = None
+        if checking_method == "llm":
+            llm_checker = create_relevance_checker(config)
+            if not llm_checker:
+                logger.warning(
+                    "LLM checking method selected, but failed to create LLM checker. Falling back to no relevance check."
+                )
+                checking_method = "none"  # Indicate no check will happen
+        elif checking_method != "keyword":
+            logger.warning(f"Unknown relevance_checking_method: '{checking_method}'. Defaulting to keyword check.")
+            checking_method = "keyword"
+
+        papers: List[Paper] = source.fetch_papers()
+        logger.info(f"📚 Fetched {len(papers)} papers from arXiv matching date criteria.")
+
+        relevant_papers: List[Paper] = []
         if not papers:
-            logger.info(f"-> No new papers found matching criteria. (Duration: {fetch_duration.total_seconds():.2f}s)")
-        else:
-            logger.info(
-                f"-> Fetched {len(papers)} papers matching date criteria. (Duration: {fetch_duration.total_seconds():.2f}s)"
-            )
+            logger.info("ℹ️ No papers fetched, skipping relevance check.")
 
-        # Remove deduplication logic
+        elif checking_method == "llm" and llm_checker:
+            # --- LLM Check ---
+            logger.info(f"🔍 Checking relevance of {len(papers)} papers using LLM...")
+            try:
+                groq_config = config.get("relevance_checker", {}).get("llm", {}).get("groq", {})
+                prompt = groq_config.get("prompt", "Is this paper relevant?")
+                confidence_threshold = groq_config.get("confidence_threshold", 0.0)
 
-        # 2. Filtering Papers (using 'papers' directly)
-        relevant_papers = []
-        if papers:
-            print_separator("-")
-            logger.info(f"🔍 Filtering {len(papers)} papers by keywords...")
-            filter_start_time = datetime.now()
-            relevant_papers = paper_filter.filter(papers)
-            filter_duration = datetime.now() - filter_start_time
-            logger.info(
-                f"-> Found {len(relevant_papers)} relevant papers. (Duration: {filter_duration.total_seconds():.2f}s)"
-            )
-        else:
-            # Revert skipping logic
-            if getattr(paper_source, "categories", None):  # Check if source had categories (ArxivSource does)
-                logger.info("-> Skipping keyword filtering as no papers matched date criteria.")
+                abstracts = [p.abstract for p in papers]
+                if abstracts:
+                    start_time = time.time()
+                    responses = llm_checker.check_relevance_batch(abstracts, prompt)
+                    duration = time.time() - start_time
+                    logger.info(f"LLM batch processing completed in {duration:.2f} seconds.")
+                    for paper, response in zip(papers, responses):
+                        if response.is_relevant and response.confidence >= confidence_threshold:
+                            paper.relevance = {"confidence": response.confidence, "explanation": response.explanation}
+                            relevant_papers.append(paper)
+                        else:
+                            logger.debug(
+                                f"Paper {paper.id} deemed not relevant by LLM (Confidence: {response.confidence:.2f})"
+                            )
+                else:
+                    logger.warning("No abstracts found in fetched papers for LLM checking.")
+            except Exception as e:
+                logger.error(f"Error during LLM batch relevance check: {e}", exc_info=True)
 
-        # 3. Outputting Results
+        elif checking_method == "keyword":
+            # --- Keyword Check ---
+            logger.info(f"🔍 Filtering {len(papers)} papers using keywords...")
+            keyword_filter = KeywordFilter()
+            keyword_filter.configure(config)
+            relevant_papers = keyword_filter.filter(papers)
+
+        else:  # E.g., checking_method was 'none' or unknown and defaulted
+            logger.info("ℹ️ No specific relevance check performed or method defaulted.")
+            relevant_papers = papers  # Pass all fetched papers through
+
+        logger.info(f"✅ Found {len(relevant_papers)} relevant papers after checking.")
+
         if relevant_papers:
-            print_separator("-")
-            logger.info("💾 Processing output...")
-            output_start_time = datetime.now()
-            output_handler.output(relevant_papers)
-            output_duration = datetime.now() - output_start_time
-            logger.info(f"-> Output processing finished. (Duration: {output_duration.total_seconds():.2f}s)")
+            output_config = config.get("output", {})
+            file_writer = FileWriter()
+            file_writer.configure(output_config)
+            file_writer.output(relevant_papers)
         else:
-            # Revert skipping logic
-            if papers:
-                logger.info("-> Skipping output as no papers were deemed relevant by filters.")
-
-        # --- Job Completion Summary ---
-        run_duration = datetime.now() - run_start_time
-        print_separator()
-        logger.info(
-            f"✅ Daily Paper Check Finished. Relevant papers found: {len(relevant_papers)}. Total duration: {run_duration.total_seconds():.2f} seconds."
-        )
-        print_separator()
+            logger.info("ℹ️ No relevant papers to save.")
 
     except Exception as e:
-        # Revert error message slightly if needed, keep outer catch
         logger.error(f"❌ An unexpected error occurred during job execution: {e}", exc_info=True)
-        print_separator("!")
-        logger.error("❗ Job execution failed unexpectedly.")
-        print_separator("!")
 
 
 # --- Script Entry Point ---
@@ -167,17 +143,25 @@ if __name__ == "__main__":
     print_separator("*")
 
     logger.info("Loading configuration from 'config.yaml'...")
-    config = load_config("config.yaml")
-    if not config:
+    config_data = load_config("config.yaml")
+    if not config_data:
         logger.error("❌ Critical error: Failed to load configuration. Please check 'config.yaml'. Exiting.")
         sys.exit(1)
     logger.info("Configuration loaded successfully.")
 
-    job_with_config = lambda: main_job(config)
+    # Log the chosen relevance checking method
+    checking_method_log = config_data.get("relevance_checking_method", "keyword").lower()
+    logger.info(f"Relevance checking method set to: '{checking_method_log}'")
+
+    # Ensure config_data is not None for the lambda type hint
+    # The check above guarantees this at runtime
+    validated_config: Dict[str, Any] = config_data
+    job_with_config = lambda: check_papers(validated_config)
 
     logger.info("Initializing scheduler...")
     try:
-        scheduler = Scheduler(config, job_with_config)
+        # Pass the validated config
+        scheduler = Scheduler(validated_config, job_with_config)
         logger.info("Starting scheduler main loop...")
         scheduler.run()
     except Exception as e:
@@ -192,162 +176,35 @@ if __name__ == "__main__":
 def create_relevance_checker(
     config: Dict[str, Any],
 ) -> Optional[GroqChecker]:
-    """Create appropriate relevance checker based on config."""
-    checker_type = config["relevance_checker"]["type"]
+    """Create LLM relevance checker instance based on config.
 
-    if checker_type == "keyword":
-        return None  # Keyword checking is handled in ArxivSource
+    Reads settings from config['relevance_checker']['llm'].
+    This function should ONLY be called if relevance_checking_method is "llm".
+    """
+    # NOTE: The decision to call this function is made in check_papers
+    # based on the top-level 'relevance_checking_method' flag.
+    llm_config = config.get("relevance_checker", {}).get("llm", {})
+    provider = llm_config.get("provider")
 
-    elif checker_type == "llm":
-        llm_config = config["relevance_checker"]["llm"]
-        provider = llm_config["provider"]
+    if provider == "groq":
+        groq_config = llm_config.get("groq", {})
+        api_key = groq_config.get("api_key")
+        if not api_key:
+            logger.error("Groq provider selected, but API key (relevance_checker.llm.groq.api_key) is missing.")
+            return None  # Cannot create checker without API key
 
-        if provider == "groq":
-            api_key = llm_config.get("api_key")
-            if not api_key:
-                raise ValueError("Groq API key is required when using Groq provider")
-            return GroqChecker(api_key)
+        # Optional: Pass model from config to checker if checker supports it
+        # model = groq_config.get("model")
+        # Consider modifying GroqChecker to accept model in __init__
+        try:
+            # Pass only api_key for now, GroqChecker uses default model
+            return GroqChecker(api_key=api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize GroqChecker: {e}", exc_info=True)
+            return None
 
-        elif provider == "custom":
-            # Import and instantiate custom checker
-            module_path = llm_config.get("module_path")
-            class_name = llm_config.get("class_name")
-            if not module_path or not class_name:
-                raise ValueError("module_path and class_name are required for custom provider")
-
-            import importlib
-
-            module = importlib.import_module(module_path)
-            checker_class = getattr(module, class_name)
-            return checker_class()
-
-        else:
-            raise ValueError(f"Unknown LLM provider: {provider}")
-
+    # elif provider == "custom": # Future extension
+    #     ...
     else:
-        raise ValueError(f"Unknown relevance checker type: {checker_type}")
-
-
-@runtime_checkable
-class PaperProtocol(Protocol):
-    title: str
-    authors: List[str]
-    categories: List[str]
-    url: str
-    abstract: str
-    relevance: Optional[Dict[str, Any]]
-
-
-@dataclass
-class Paper:
-    title: str
-    authors: List[str]
-    categories: List[str]
-    url: str
-    abstract: str
-    relevance: Optional[Dict[str, Any]] = field(default=None)
-
-
-def check_papers(config: Dict[str, Any]) -> None:
-    """Check for new relevant papers."""
-    try:
-        # Create paper source
-        source = ArxivSource()
-
-        # Create relevance checker if needed
-        relevance_checker = create_relevance_checker(config)
-
-        # Fetch papers
-        papers = source.fetch_papers()
-        logger.info(f"📚 Fetched {len(papers)} papers from arXiv")
-
-        # Check relevance
-        relevant_papers: List[PaperProtocol] = []
-        if relevance_checker:
-            # Use LLM-based checking
-            llm_config = config["relevance_checker"]["llm"]
-            prompt = llm_config["prompt"]
-            confidence_threshold = llm_config["confidence_threshold"]
-
-            # Process papers one by one
-            for paper in papers:
-                response = relevance_checker.check_relevance(paper.abstract, prompt)
-                if response.is_relevant and response.confidence >= confidence_threshold:
-                    if isinstance(paper, PaperProtocol):
-                        paper.relevance = {"confidence": response.confidence, "explanation": response.explanation}
-                        relevant_papers.append(paper)
-        else:
-            # Use keyword-based checking
-            relevant_papers = [p for p in papers if isinstance(p, PaperProtocol)]
-
-        # Save relevant papers
-        if relevant_papers:
-            output_config = config["output"]
-            output_file = output_config["file"]
-            output_format = output_config["format"]
-            include_confidence = output_config.get("include_confidence", False)
-            include_explanation = output_config.get("include_explanation", False)
-
-            with open(output_file, "a", encoding="utf-8") as f:
-                for paper in relevant_papers:
-                    if output_format == "markdown":
-                        f.write(f"## {paper.title}\n\n")
-                        f.write(f"**Authors:** {', '.join(paper.authors)}\n\n")
-                        f.write(f"**Categories:** {', '.join(paper.categories)}\n\n")
-                        f.write(f"**URL:** {paper.url}\n\n")
-                        f.write(f"**Abstract:**\n{paper.abstract}\n\n")
-
-                        if include_confidence and paper.relevance:
-                            f.write(f"**Relevance Confidence:** {paper.relevance['confidence']:.2f}\n\n")
-                        if include_explanation and paper.relevance:
-                            f.write(f"**Relevance Explanation:**\n{paper.relevance['explanation']}\n\n")
-                        f.write("---\n\n")
-                    else:
-                        f.write(f"Title: {paper.title}\n")
-                        f.write(f"Authors: {', '.join(paper.authors)}\n")
-                        f.write(f"Categories: {', '.join(paper.categories)}\n")
-                        f.write(f"URL: {paper.url}\n")
-                        f.write(f"Abstract:\n{paper.abstract}\n")
-
-                        if include_confidence and paper.relevance:
-                            f.write(f"Relevance Confidence: {paper.relevance['confidence']:.2f}\n")
-                        if include_explanation and paper.relevance:
-                            f.write(f"Relevance Explanation:\n{paper.relevance['explanation']}\n")
-                        f.write("\n" + "=" * 80 + "\n\n")
-
-            logger.info(f"✅ Saved {len(relevant_papers)} relevant papers to {output_file}")
-        else:
-            logger.info("ℹ️ No relevant papers found")
-
-    except Exception as e:
-        logger.error(f"❌ An unexpected error occurred during job execution: {e}", exc_info=True)
-
-
-def main():
-    """Main entry point."""
-    try:
-        # Load configuration
-        config = load_config()
-
-        # Schedule the job
-        schedule_config = config["schedule"]
-        schedule.every().day.at(schedule_config["run_time"]).do(check_papers, config)
-
-        logger.info("🚀 Starting arXiv Paper Monitor")
-        logger.info(f"⏰ Scheduled to run daily at {schedule_config['run_time']} {schedule_config['timezone']}")
-
-        # Run the job immediately
-        check_papers(config)
-
-        # Keep the script running
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
-
-    except Exception as e:
-        logger.error(f"❌ Fatal error: {e}", exc_info=True)
-        raise
-
-
-if __name__ == "__main__":
-    main()
+        logger.error(f"LLM relevance checking selected, but unknown or unsupported provider specified: '{provider}'")
+        return None  # Return None if provider is unknown/unsupported

@@ -1,7 +1,10 @@
 arxiv
 schedule
 PyYAML
+requests
 groq
+tqdm
+pytz
 
 # Testing
 pytest
