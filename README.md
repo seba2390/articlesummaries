@@ -1,66 +1,73 @@
-# arXiv Paper Monitor
+# 📄 arXiv Paper Monitor
 
-## Description
+## 📝 Description
 
 This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers submitted or updated within the last 24 hours across specified categories, filters them based on relevance (currently keyword matching in title/abstract), and appends the details of relevant papers to an output file.
 
 The application runs on a daily schedule and is designed with a modular structure, making it easy to extend with new paper sources, different filtering mechanisms, or alternative output methods.
 
-## Features
+## ✨ Features
 
 *   **Configurable Monitoring:** Define arXiv categories, keywords, and fetch limits in a simple `config.yaml` file.
 *   **Recent Paper Fetching:** Focuses on papers submitted/updated within the last 24 hours (relative to script run time).
 *   **Total Results Limit:** Set a maximum total number of papers to fetch (`max_total_results`) as a safeguard.
-*   **Daily Scheduling:** Automatically checks for new papers at a configurable time each day.
+*   **Daily Scheduling:** Automatically checks for new papers at a configurable time each day using the `schedule` library.
 *   **Keyword Filtering:** Filters papers based on the presence of keywords in the title or abstract.
 *   **File Output:** Appends details of relevant papers (ID, Title, Authors, URL, Abstract, Updated Date) to a specified text file.
 *   **Structured Console Output:** Provides clear, formatted logging during execution.
 *   **Modular Design:** Easily extensible with new paper sources, filters, or output handlers using Abstract Base Classes (ABCs).
 *   **Tested:** Includes a `pytest` test suite for verifying functionality.
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 articlesummaries/
+├── .git/                   # Git repository data
+├── .gitignore              # Files/directories ignored by Git
+├── .pytest_cache/          # Pytest cache directory
+├── __pycache__/            # Python bytecode cache
 ├── config.yaml             # Configuration file
-├── requirements.txt        # Python dependencies
 ├── main.py                 # Main script to run the monitor
 ├── pytest.ini              # Pytest configuration
+├── README.md               # This file
+├── relevant_papers.txt     # Default output file (created/appended by the script)
+├── requirements.txt        # Python dependencies
 ├── src/                    # Source code directory
 │   ├── __init__.py
 │   ├── config_loader.py    # Handles loading config.yaml
-│   ├── scheduler.py        # Handles job scheduling
-│   ├── paper.py            # Defines the Paper data structure
-│   ├── paper_sources/      # Modules for fetching papers
-│   │   ├── __init__.py
-│   │   ├── base_source.py  # ABC for paper sources
-│   │   └── arxiv_source.py # arXiv implementation
 │   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
 │   │   ├── base_filter.py  # ABC for filters
 │   │   └── keyword_filter.py # Keyword filtering implementation
-│   └── output/             # Modules for handling output
-│       ├── __init__.py
-│       ├── base_output.py  # ABC for output handlers
-│       └── file_writer.py  # File writing implementation
+│   ├── output/             # Modules for handling output
+│   │   ├── __init__.py
+│   │   ├── base_output.py  # ABC for output handlers
+│   │   └── file_writer.py  # File writing implementation
+│   ├── paper_sources/      # Modules for fetching papers
+│   │   ├── __init__.py
+│   │   ├── base_source.py  # ABC for paper sources
+│   │   └── arxiv_source.py # arXiv implementation
+│   ├── paper.py            # Defines the Paper data structure
+│   └── scheduler.py        # Handles job scheduling
 ├── tests/                  # Test suite directory
 │   ├── __init__.py
-│   ├── test_config_loader.py
-│   ├── test_main.py
-│   ├── test_scheduler.py
-│   ├── paper_sources/
-│   │   ├── __init__.py
-│   │   └── test_arxiv_source.py
 │   ├── filtering/
 │   │   ├── __init__.py
 │   │   └── test_keyword_filter.py
-│   └── output/
-│       ├── __init__.py
-│       └── test_file_writer.py
-└── relevant_papers.txt     # Default output file (created/appended by the script)
+│   ├── output/
+│   │   ├── __init__.py
+│   │   └── test_file_writer.py
+│   ├── paper_sources/
+│   │   ├── __init__.py
+│   │   └── test_arxiv_source.py
+│   ├── test_config_loader.py
+│   ├── test_main.py
+│   └── test_scheduler.py
+└── venv/                   # Virtual environment (if created according to setup)
 ```
+*Note: Cache, venv, and output files might be generated during setup/runtime.*
 
-## Setup and Installation
+## 🛠️ Setup and Installation
 
 1.  **Clone the repository (if applicable):**
     ```bash
@@ -69,15 +76,20 @@ articlesummaries/
     ```
 2.  **Create and activate a virtual environment (recommended):**
     ```bash
-    python3 -m venv venv # Or python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    # For macOS/Linux
+    python3 -m venv venv
+    source venv/bin/activate
+
+    # For Windows
+    python -m venv venv
+    .\venv\Scripts\activate
     ```
 3.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-## Configuration
+## ⚙️ Configuration
 
 Edit the `config.yaml` file to customize the monitor's behavior:
 
@@ -87,7 +99,7 @@ Edit the `config.yaml` file to customize the monitor's behavior:
 *   `run_time_daily`: The time of day (HH:MM format, 24-hour clock) to run the check.
 *   `output_file`: The path to the file where relevant paper details will be appended.
 
-## Usage
+## ▶️ Usage
 
 Run the main script from the project's root directory:
 
@@ -95,9 +107,9 @@ Run the main script from the project's root directory:
 python main.py
 ```
 
-The script will perform an initial check upon starting and then run daily at the time specified in `config.yaml`. It will log its progress to the console with clear formatting. Press `Ctrl+C` to stop the script.
+The script will perform an initial check upon starting and then run daily at the time specified in `config.yaml`. It will log its progress to the console with clear formatting. Press `Ctrl+C` to stop the script gracefully.
 
-## Testing
+## ✅ Testing
 
 The project includes a test suite using `pytest`. To run the tests:
 
@@ -111,7 +123,7 @@ The project includes a test suite using `pytest`. To run the tests:
     pytest -v
     ```
 
-## Extensibility
+## 🚀 Extensibility
 
 The use of Abstract Base Classes (`src/paper_sources/base_source.py`, `src/filtering/base_filter.py`, `src/output/base_output.py`) makes extending the application straightforward:
 
@@ -128,12 +140,16 @@ The use of Abstract Base Classes (`src/paper_sources/base_source.py`, `src/filte
     *   Implement `configure` and `output`. The `output` method receives the list of relevant `Paper` objects.
     *   Modify `main.py` to use your new output handler.
 
-## Dependencies
+## 📦 Dependencies
 
 *   **Runtime:**
     *   [arxiv](https://pypi.org/project/arxiv/): Python wrapper for the arXiv API.
     *   [schedule](https://pypi.org/project/schedule/): Human-friendly Python job scheduling.
     *   [PyYAML](https://pypi.org/project/PyYAML/): YAML parser and emitter for Python.
+    *   [groq](https://pypi.org/project/groq/): Python client for Groq API (Note: review usage if integrated).
 *   **Testing:**
     *   [pytest](https://pypi.org/project/pytest/): Testing framework.
     *   [pytest-mock](https://pypi.org/project/pytest-mock/): Pytest fixture for mocking.
+
+---
+_This README reflects the project structure and dependencies as of April 2024._
