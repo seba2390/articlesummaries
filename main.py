@@ -9,6 +9,7 @@ This script orchestrates the application flow:
 """
 
 import logging
+import os
 import sys
 import time
 from datetime import datetime  # Import datetime for run start time
@@ -43,6 +44,84 @@ logger = logging.getLogger()
 def print_separator(char="=", length=70):
     """Prints a separator line to the console for better visual structure."""
     print(char * length)
+
+
+# --- LLM Checker Factory ---
+# Moved this function before check_papers where it is called
+def create_relevance_checker(
+    config: Dict[str, Any],
+) -> Optional[GroqChecker]:  # Note: Currently hardcoded to return GroqChecker or None
+    """Factory function to create an LLM relevance checker instance based on config.
+
+    Reads settings from config['relevance_checker']['llm'].
+    Currently supports 'groq'. Returns None if configuration is invalid,
+    the provider is unsupported, or initialization fails.
+
+    Args:
+        config: The main application configuration dictionary.
+
+    Returns:
+        An initialized GroqChecker instance or None on failure.
+    """
+    # Decision to call this function is made in check_papers
+    llm_config = config.get("relevance_checker", {}).get("llm", {})
+    provider = llm_config.get("provider")
+
+    if provider == "groq":
+        groq_config = llm_config.get("groq", {})
+        # SECURITY: Prioritize environment variable for API Key
+        api_key = os.getenv("GROQ_API_KEY") or groq_config.get("api_key")
+
+        if not api_key:
+            logger.error(
+                "Groq provider selected, but API key is missing. "
+                "Set GROQ_API_KEY env var or relevance_checker.llm.groq.api_key in config."
+            )
+            return None
+
+        try:
+            # Extract model and batch_size from config, providing defaults if missing
+            model = groq_config.get("model")  # Defaults to DEFAULT_MODEL in GroqChecker if None
+            batch_size_cfg = groq_config.get("batch_size")  # Defaults in GroqChecker if None or 0
+            batch_size = int(batch_size_cfg) if batch_size_cfg is not None else None
+            # Extract batch delay
+            batch_delay_cfg = groq_config.get("batch_delay_seconds")
+            batch_delay = float(batch_delay_cfg) if batch_delay_cfg is not None else None
+
+            # Pass all relevant parameters to the constructor
+            checker_instance = GroqChecker(
+                api_key=api_key,
+                model=model,  # Pass configured model (or None for default)
+                batch_size=batch_size,  # Pass configured batch_size (or None for default)
+                batch_delay_seconds=batch_delay,  # Pass configured delay (or None for default)
+            )
+            # Log the actual model used by the checker instance if accessible
+            actual_model = getattr(checker_instance, "model", "[Not Exposed]")  # Safely get model if attr exists
+            logger.info(f"Groq relevance checker initialized successfully (Model: {actual_model}).")
+            return checker_instance
+        except Exception as e:
+            logger.error(f"Failed to initialize GroqChecker: {e}", exc_info=True)
+            return None
+
+    # elif provider == "anthropic": # Example for future extension
+    #     anthropic_config = llm_config.get("anthropic", {})
+    #     # ... get API key, model, etc. ...
+    #     try:
+    #         # return AnthropicChecker(...)
+    #     except Exception as e:
+    #         logger.error(f"Failed to initialize AnthropicChecker: {e}", exc_info=True)
+    #         return None
+
+    else:
+        if provider:
+            logger.error(
+                f"LLM relevance checking selected, but unknown or unsupported provider specified: '{provider}'"
+            )
+        else:
+            logger.error(
+                "LLM relevance checking selected, but no provider specified under relevance_checker.llm.provider."
+            )
+        return None  # Return None if provider is missing, unknown, or unsupported
 
 
 # --- Main Job Definition ---
@@ -226,61 +305,3 @@ if __name__ == "__main__":
     # This part is reached only if the scheduler loop exits gracefully (e.g., KeyboardInterrupt)
     logger.info("🛑 ArXiv Paper Monitor stopped.")
     print_separator("*")
-
-
-def create_relevance_checker(
-    config: Dict[str, Any],
-) -> Optional[GroqChecker]:
-    """Factory function to create an LLM relevance checker instance based on config.
-
-    Reads settings from config['relevance_checker']['llm'].
-    Currently supports 'groq'. Returns None if configuration is invalid,
-    the provider is unsupported, or initialization fails.
-
-    Args:
-        config: The main application configuration dictionary.
-
-    Returns:
-        An initialized GroqChecker instance or None on failure.
-    """
-    # Decision to call this function is made in check_papers
-    llm_config = config.get("relevance_checker", {}).get("llm", {})
-    provider = llm_config.get("provider")
-
-    if provider == "groq":
-        groq_config = llm_config.get("groq", {})
-        api_key = groq_config.get("api_key")
-        if not api_key:
-            logger.error("Groq provider selected, but API key (relevance_checker.llm.groq.api_key) is missing.")
-            return None
-
-        try:
-            # Pass only required parameters (currently just api_key based on implementation)
-            checker_instance = GroqChecker(api_key=api_key)
-            # Log the actual model used by the checker instance if accessible
-            actual_model = getattr(checker_instance, "model", "[Not Exposed]")  # Safely get model if attr exists
-            logger.info(f"Groq relevance checker initialized successfully (Model: {actual_model}).")
-            return checker_instance
-        except Exception as e:
-            logger.error(f"Failed to initialize GroqChecker: {e}", exc_info=True)
-            return None
-
-    # elif provider == "anthropic": # Example for future extension
-    #     anthropic_config = llm_config.get("anthropic", {})
-    #     # ... get API key, model, etc. ...
-    #     try:
-    #         # return AnthropicChecker(...)
-    #     except Exception as e:
-    #         logger.error(f"Failed to initialize AnthropicChecker: {e}", exc_info=True)
-    #         return None
-
-    else:
-        if provider:
-            logger.error(
-                f"LLM relevance checking selected, but unknown or unsupported provider specified: '{provider}'"
-            )
-        else:
-            logger.error(
-                "LLM relevance checking selected, but no provider specified under relevance_checker.llm.provider."
-            )
-        return None  # Return None if provider is missing, unknown, or unsupported

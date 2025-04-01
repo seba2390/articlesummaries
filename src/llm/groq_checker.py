@@ -2,380 +2,380 @@
 
 import json
 import logging
+import os  # Added for potential future env var use
 import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-import requests
+# Removed requests import as we will use the Groq SDK
+# import requests
+from groq import APIConnectionError, APIStatusError, Groq, GroqError, RateLimitError  # Import Groq SDK
+
+# Import specific type for message params to fix linter error
+from groq.types.chat.completion_create_params import ChatCompletionMessageParam
 
 from .base_checker import BaseLLMChecker, LLMResponse
 
 # Logger for this module
 logger = logging.getLogger(__name__)
 
-# Define a default timeout for HTTP requests
-DEFAULT_REQUEST_TIMEOUT = 30  # seconds
+# Define a default timeout for HTTP requests (less relevant with SDK, but can keep)
+DEFAULT_REQUEST_TIMEOUT = 60  # Increased timeout for potentially longer batch requests
+DEFAULT_BATCH_SIZE = 10
+DEFAULT_BATCH_DELAY_SECONDS = 2  # Default seconds to wait between batches
 
 
 class GroqChecker(BaseLLMChecker):
     """Concrete LLM relevance checker implementation using the Groq API.
 
-    This class interacts with the Groq API (specifically the OpenAI-compatible
-    chat completions endpoint) to assess paper relevance based on abstracts.
-    It supports both single and batch processing of abstracts.
+    Uses the official `groq` Python SDK to assess paper relevance.
+    Processes abstracts in batches to optimize API calls and respect rate limits.
 
     Attributes:
         api_key: The Groq API key for authentication.
-        model: The specific Groq model to use (defaults to llama-3.1-8b-instant).
-        relevance_criteria: Optional string describing the relevance criteria,
-                            used in the system prompt.
-        base_url: The base URL for the Groq chat completions API endpoint.
-        headers: Standard headers including Authorization for API requests.
+        model: The specific Groq model to use.
+        client: An instance of the Groq client.
+        batch_size: Number of abstracts to process per API call.
+        batch_delay_seconds: Seconds to wait between batch API calls.
     """
 
-    DEFAULT_MODEL = "llama-3.1-8b-instant"  # Known fast and capable model
-    BASE_API_URL = "https://api.groq.com/openai/v1"
+    DEFAULT_MODEL = "llama-3.1-8b-instant"
 
-    def __init__(self, api_key: str, model: Optional[str] = None, relevance_criteria: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: Optional[str] = None,
+        batch_size: Optional[int] = None,
+        batch_delay_seconds: Optional[float] = None,  # Added parameter
+    ):
         """Initializes the GroqChecker.
 
         Args:
             api_key: The Groq API key.
-            model: The specific Groq model ID to use (e.g., 'mixtral-8x7b-32768').
-                   Defaults to `DEFAULT_MODEL` if None.
-            relevance_criteria: Optional description of relevance criteria to include
-                                in the system prompt for the LLM.
+            model: The specific Groq model ID to use.
+            batch_size: Number of abstracts to process per API call.
+            batch_delay_seconds: Seconds to wait between batch API calls.
         """
         if not api_key:
+            # This check might be redundant if create_relevance_checker already validates
             raise ValueError("Groq API key must be provided.")
 
         self.api_key: str = api_key
         self.model: str = model or self.DEFAULT_MODEL
-        self.relevance_criteria: str = (
-            relevance_criteria or "Determine relevance based on general scientific interest and potential impact."
+        self.batch_size: int = batch_size if batch_size is not None and batch_size > 0 else DEFAULT_BATCH_SIZE
+        # Use provided delay or the default
+        self.batch_delay_seconds: float = (
+            batch_delay_seconds
+            if batch_delay_seconds is not None and batch_delay_seconds >= 0
+            else DEFAULT_BATCH_DELAY_SECONDS
         )
-        self.base_url: str = f"{self.BASE_API_URL}/chat/completions"
-        self.batch_url: str = f"{self.BASE_API_URL}/batches"
-        self.files_url: str = f"{self.BASE_API_URL}/files"
-        self.headers: Dict[str, str] = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        logger.info(f"GroqChecker initialized with model: {self.model}")
+        logger.info(f"Using batch size: {self.batch_size}, Batch delay: {self.batch_delay_seconds}s")
 
-    def _create_system_prompt(self) -> str:
-        """Creates the system prompt including relevance criteria."""
+        # Initialize the Groq client
+        try:
+            self.client = Groq(api_key=self.api_key, timeout=DEFAULT_REQUEST_TIMEOUT)
+            logger.info(f"Groq client initialized successfully for model: {self.model}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Groq client: {e}", exc_info=True)
+            # Raise a more specific error or handle inability to initialize
+            raise GroqError(f"Failed to initialize Groq client: {e}") from e
+
+    def _create_batch_system_prompt(self, count: int) -> str:
+        """Creates the system prompt instructing the LLM to return a JSON array for a batch."""
         return (
-            "You are an expert research assistant assessing paper relevance. "
-            "Based on the provided abstract and relevance prompt, determine if the paper is relevant. "
-            f"Relevance Criteria: {self.relevance_criteria}\n\n"
-            "Respond ONLY with a single JSON object containing three keys: "
+            "You are an expert research assistant assessing paper relevance for multiple abstracts. "
+            "Based on the provided abstracts and relevance prompt, determine if each paper is relevant. "
+            "Respond ONLY with a single JSON array where each element corresponds to an abstract in the input order. "
+            f"The array must contain exactly {count} elements. "
+            "Each element in the array must be a JSON object with three keys: "
             "'is_relevant' (boolean: true if relevant, false otherwise), "
-            "'confidence' (float: your confidence level from 0.0 to 1.0), and "
+            "'confidence' (float: your confidence level from 0.0 to 1.0, e.g., 0.85), and "
             "'explanation' (string: a brief justification for your decision, max 50 words)."
         )
 
+    def _create_batch_user_message(self, abstracts: List[str], prompt: str) -> str:
+        """Creates the user message containing numbered abstracts for a batch."""
+        user_message = f"Relevance Prompt for all abstracts below: {prompt}\n\n---\n"
+        for i, abstract in enumerate(abstracts):
+            user_message += f"Abstract {i + 1}:\n{abstract}\n\n---\n"
+        return user_message
+
     def check_relevance(self, abstract: str, prompt: str) -> LLMResponse:
-        """Checks the relevance of a single paper abstract using the Groq chat completions API.
+        """Checks the relevance of a single paper abstract.
+
+        This method is kept for potential direct use but batch processing
+        is preferred via `check_relevance_batch`.
 
         Args:
             abstract: The abstract text of the paper.
             prompt: The specific user prompt defining the desired relevance focus.
 
         Returns:
-            An LLMResponse object. On error, returns a default LLMResponse
-            indicating failure, with the error message in the explanation.
+            An LLMResponse object.
         """
-        system_prompt = self._create_system_prompt()
-        user_message = f"Relevance Prompt: {prompt}\n\nAbstract: {abstract}"
+        # Essentially run a batch of size 1
+        batch_responses = self._process_abstract_batch([abstract], prompt)
+        return batch_responses[0] if batch_responses else LLMResponse(explanation="Failed to process single abstract.")
 
-        messages = [
+    def _process_abstract_batch(self, abstract_batch: List[str], prompt: str) -> List[LLMResponse]:
+        """Processes a single batch of abstracts through the Groq API.
+
+        Args:
+            abstract_batch: A list of abstracts (up to self.batch_size).
+            prompt: The user prompt for relevance assessment.
+
+        Returns:
+            A list of LLMResponse objects corresponding to the abstracts in the batch.
+            Returns default error responses if the API call fails or parsing fails.
+        """
+        batch_actual_size = len(abstract_batch)
+        if batch_actual_size == 0:
+            return []
+
+        system_prompt = self._create_batch_system_prompt(batch_actual_size)
+        user_message = self._create_batch_user_message(abstract_batch, prompt)
+
+        messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ]
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": 0.2,  # Low temperature for consistent JSON output
-            "max_tokens": 150,  # Max tokens for the JSON response + explanation
-            "response_format": {"type": "json_object"},  # Request JSON output
-        }
-
         content_str: Optional[str] = None
         try:
-            response = requests.post(self.base_url, headers=self.headers, json=payload, timeout=DEFAULT_REQUEST_TIMEOUT)
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+            logger.debug(f"Sending batch request to Groq API (model: {self.model}, size: {batch_actual_size})...")
+            start_time = time.time()
 
-            # Extract and parse the JSON response from the LLM
-            response_data = response.json()
-            content_str = response_data["choices"][0]["message"]["content"]
+            chat_completion = self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                temperature=0.2,
+                max_tokens=150 * batch_actual_size,  # Estimate max tokens needed for the JSON array
+                response_format={"type": "json_object"},
+            )
+            duration = time.time() - start_time
+            logger.debug(f"Groq API batch request completed in {duration:.2f} seconds.")
 
-            # Explicitly check type before loading to satisfy linter
-            if content_str is None:
-                raise ValueError("Extracted content string is unexpectedly None after assignment.")
+            if not chat_completion.choices:
+                raise ValueError("Groq API response missing 'choices'.")
+            message = chat_completion.choices[0].message
+            if not message or not message.content:
+                raise ValueError("Groq API response missing message content.")
 
-            result = json.loads(content_str)
+            content_str = message.content
+            # The response might be the list directly, or a dict containing the list
+            raw_result = json.loads(content_str)
 
-            # Basic validation of the received JSON structure
-            if not all(k in result for k in ["is_relevant", "confidence", "explanation"]):
-                raise ValueError("LLM response missing required keys.")
-            if not isinstance(result["is_relevant"], bool):
+            # Check if the response is a dict containing the expected list key
+            if isinstance(raw_result, dict) and "abstracts" in raw_result:
+                results_list = raw_result["abstracts"]
+                logger.debug("Extracted results list from 'abstracts' key in response dict.")
+            elif isinstance(raw_result, list):
+                results_list = raw_result  # It was already a list
+            else:
+                # Neither a list nor a dict with the expected key
+                raise ValueError(
+                    f"LLM response was not a JSON list or dict containing 'abstracts'. Got: {type(raw_result)}"
+                )
+
+            # Now validate the extracted/found list
+            if not isinstance(results_list, list):  # This check might be redundant now but safe
+                raise ValueError(f"Internal error: Extracted result is not a list. Got: {type(results_list)}")
+
+            if len(results_list) != batch_actual_size:
+                logger.warning(
+                    f"LLM response list size ({len(results_list)}) does not match batch size "
+                    f"({batch_actual_size}). Padding with errors."
+                )
+                # Create default error responses for the mismatch
+                error_response = LLMResponse(explanation="LLM response size mismatch.")
+                # Return error responses for the entire batch if size mismatch is significant?
+                # Or try to use what we got and pad? Let's pad for now.
+                parsed_responses = [self._parse_individual_result(res) for res in results_list]
+                # Pad with errors up to batch_actual_size
+                parsed_responses.extend([error_response] * (batch_actual_size - len(results_list)))
+                return parsed_responses[:batch_actual_size]  # Ensure we don't exceed expected size
+
+            # Parse each item in the list
+            parsed_responses = [self._parse_individual_result(res) for res in results_list]
+            return parsed_responses
+
+        except RateLimitError as e:
+            logger.error(
+                f"Groq API rate limit exceeded during batch: {e}", exc_info=False
+            )  # Log less verbosely for rate limits
+            return [
+                LLMResponse(explanation=f"Error: Groq API rate limit hit ({type(e).__name__}).")
+            ] * batch_actual_size
+        except APIStatusError as e:
+            if e.status_code == 413:
+                logger.error(f"Request for batch size {batch_actual_size} is too large for the model. {e.message}")
+                logger.error(
+                    f"Suggestion: Decrease 'batch_size' in config.yaml (currently {self.batch_size}) and try again."
+                )
+                return [
+                    LLMResponse(explanation="Error: Request too large for model. Reduce batch_size.")
+                ] * batch_actual_size
+            else:
+                # Re-raise other status errors to be caught by GroqError handler
+                raise e
+        except (APIConnectionError, GroqError) as e:
+            logger.error(f"Groq API error during batch: {e}", exc_info=True)
+            return [LLMResponse(explanation=f"Error: Groq API error ({type(e).__name__}).")] * batch_actual_size
+        except (json.JSONDecodeError, KeyError, ValueError, IndexError) as e:
+            logger.error(f"Error parsing/validating Groq batch response: {e}", exc_info=True)
+            if content_str is not None:
+                logger.error(f"Problematic response content from Groq batch: {content_str}")
+            return [
+                LLMResponse(explanation=f"Error: Failed to parse/validate batch response ({type(e).__name__}).")
+            ] * batch_actual_size
+        except Exception as e:
+            logger.error(f"Unexpected error processing batch with Groq: {e}", exc_info=True)
+            return [LLMResponse(explanation=f"Error: Unexpected batch error ({type(e).__name__}).")] * batch_actual_size
+
+    def _parse_individual_result(self, result_item: Any) -> LLMResponse:
+        """Parses and validates a single JSON object from the batch response array."""
+        if not isinstance(result_item, dict):
+            logger.warning(f"Expected dict in batch result array, got {type(result_item)}.")
+            return LLMResponse(explanation="Invalid item type in LLM response array.")
+
+        try:
+            # Validate structure
+            if not all(k in result_item for k in ["is_relevant", "confidence", "explanation"]):
+                raise ValueError("Item missing required keys.")
+            if not isinstance(result_item["is_relevant"], bool):
                 raise ValueError("'is_relevant' key must be a boolean.")
-            if not isinstance(result["confidence"], (float, int)):
+            if not isinstance(result_item["confidence"], (float, int)):
                 raise ValueError("'confidence' key must be a number.")
 
             return LLMResponse(
-                is_relevant=result["is_relevant"],
-                confidence=float(result["confidence"]),
-                explanation=result["explanation"],
+                is_relevant=result_item["is_relevant"],
+                confidence=float(result_item["confidence"]),
+                explanation=str(result_item["explanation"]),
             )
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP request error checking relevance with Groq: {e}", exc_info=True)
-            return LLMResponse(
-                is_relevant=False,
-                confidence=0.0,
-                explanation=f"Error occurred: Network or API request failed ({type(e).__name__})",
-            )
-        except (json.JSONDecodeError, KeyError, ValueError, IndexError) as e:
-            logger.error(f"Error parsing or validating Groq LLM response: {e}", exc_info=True)
-            if content_str is not None:
-                logger.error(f"Problematic response content: {content_str}")
-            return LLMResponse(
-                is_relevant=False,
-                confidence=0.0,
-                explanation=f"Error occurred: Failed to parse or validate LLM response ({type(e).__name__}).",
-            )
-        except Exception as e:
-            # Catch any other unexpected errors
-            logger.error(f"Unexpected error checking relevance with Groq: {e}", exc_info=True)
-            return LLMResponse(
-                is_relevant=False,
-                confidence=0.0,
-                explanation=f"Error occurred: An unexpected error occurred ({type(e).__name__}).",
-            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"Failed to parse item in LLM response array: {e}. Item: {result_item}")
+            return LLMResponse(explanation=f"Invalid item structure in LLM response array ({type(e).__name__}).")
 
     def check_relevance_batch(self, abstracts: List[str], prompt: str) -> List[LLMResponse]:
-        """Processes multiple abstracts using the Groq Batch API.
+        """Processes multiple abstracts in batches using the Groq API.
 
-        Constructs a batch request, submits it, polls for completion,
-        retrieves the results, and parses them into LLMResponse objects.
+        Divides the abstracts into batches, processes each batch via a single API call,
+        and combines the results. Includes delays between batches to manage rate limits.
 
         Args:
             abstracts: A list of abstract texts to check.
             prompt: The prompt guiding the relevance assessment for all abstracts.
 
         Returns:
-            A list of LLMResponse objects, one for each abstract. If the batch
-            fails entirely, returns a list of default failure responses.
-            If individual items fail parsing, they get a failure response.
+            A list of LLMResponse objects, one for each abstract.
         """
         if not abstracts:
             return []
 
-        logger.info(f"Preparing Groq batch request for {len(abstracts)} abstracts...")
-        system_prompt = self._create_system_prompt()
+        total_abstracts = len(abstracts)
+        logger.info(
+            f"Checking relevance for {total_abstracts} abstracts in batches of {self.batch_size} "
+            f"using Groq API (Delay: {self.batch_delay_seconds}s)..."
+        )
+        start_time_total = time.time()
+        all_responses: List[LLMResponse] = []
+        processed_count = 0
 
-        # Create individual requests for the batch payload
-        requests_data = []
-        for i, abstract in enumerate(abstracts):
-            user_message = f"Relevance Prompt: {prompt}\n\nAbstract: {abstract}"
-            request_body = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                "temperature": 0.2,
-                "max_tokens": 150,
-                "response_format": {"type": "json_object"},
-            }
-            requests_data.append({
-                "custom_id": f"req_{i}",  # Custom ID to map results back
-                "method": "POST",
-                "url": "/v1/chat/completions",  # Relative URL for batch API
-                "body": request_body,
-            })
+        for i in range(0, total_abstracts, self.batch_size):
+            batch_start_index = i
+            batch_end_index = min(i + self.batch_size, total_abstracts)
+            abstract_batch = abstracts[batch_start_index:batch_end_index]
+            batch_num = (i // self.batch_size) + 1
+            total_batches = (total_abstracts + self.batch_size - 1) // self.batch_size
 
-        # Submit the batch request
-        batch_payload = {
-            "input_file_id": None,  # We are providing data directly
-            "endpoint": "/v1/chat/completions",
-            "completion_window": "24h",  # Default completion window
-            "requests": requests_data,  # Include requests directly (Groq feature)
-        }
+            logger.info(
+                f"Processing batch {batch_num}/{total_batches} (Abstracts {batch_start_index + 1}-{batch_end_index})..."
+            )
 
-        batch_id = None
+            batch_responses = self._process_abstract_batch(abstract_batch, prompt)
+            all_responses.extend(batch_responses)
+            processed_count += len(abstract_batch)
+
+            # Check for rate limit errors specifically and wait longer if needed
+            if any("RateLimitError" in resp.explanation for resp in batch_responses):
+                logger.warning(f"Rate limit hit processing batch {batch_num}. Waiting longer before next batch...")
+                time.sleep(10)  # Wait longer after hitting a rate limit
+            # Add configured delay between batches unless it's the last one
+            elif i + self.batch_size < total_abstracts:
+                logger.debug(f"Waiting {self.batch_delay_seconds}s before next batch...")
+                time.sleep(self.batch_delay_seconds)  # Use the instance attribute
+
+        duration_total = time.time() - start_time_total
+        # Log final count processed vs expected
+        if processed_count != total_abstracts or len(all_responses) != total_abstracts:
+            logger.warning(
+                f"Mismatch in processed counts: Expected {total_abstracts}, Processed Count: {processed_count}, "
+                f"Total Responses: {len(all_responses)}"
+            )
+
+        logger.info(f"Batch relevance check for {total_abstracts} abstracts completed in {duration_total:.2f} seconds.")
+        return all_responses  # Return all collected responses
+
+    # --- Removed old batch processing methods that used requests and /batches ---
+    # _poll_batch_and_get_results
+    # _fetch_results_content
+
+
+# Optional: Add a main block for testing this module directly
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Testing GroqChecker module...")
+
+    # Requires GROQ_API_KEY environment variable to be set
+    api_key_env = os.getenv("GROQ_API_KEY")
+    if not api_key_env:
+        logger.error("GROQ_API_KEY environment variable not set. Cannot run tests.")
+    else:
         try:
-            logger.info(f"Submitting batch request to {self.batch_url}...")
-            response = requests.post(
-                self.batch_url, headers=self.headers, json=batch_payload, timeout=DEFAULT_REQUEST_TIMEOUT
+            # Test with a specific batch size
+            checker = GroqChecker(api_key=api_key_env, batch_size=5)
+
+            # Test single relevance check (uses _process_abstract_batch internally)
+            test_abstract_1 = "This paper introduces a novel method for accelerating quantum circuit simulation using tensor networks."
+            test_prompt_1 = "Is this paper relevant to quantum circuit simulation?"
+            logger.info("--- Testing Single Relevance Check (via batch method) ---")
+            response_1 = checker.check_relevance(test_abstract_1, test_prompt_1)
+            logger.info(f"Test Abstract 1: {test_abstract_1}")
+            logger.info(
+                f"Response 1: Relevant={response_1.is_relevant}, Conf={response_1.confidence:.2f}, Expl='{response_1.explanation}'"
             )
-            response.raise_for_status()
-            batch_info = response.json()
-            batch_id = batch_info.get("id")
-            if not batch_id:
-                raise ValueError("Batch ID not found in Groq API response.")
-            logger.info(f"Groq batch request submitted successfully. Batch ID: {batch_id}")
 
-            # Wait for completion and retrieve results file content
-            results_content = self._poll_batch_and_get_results(batch_id)
-            logger.info(f"Batch {batch_id} completed. Processing {len(results_content)} results...")
+            # Test batch relevance check
+            test_abstract_2 = "We discuss the impact of climate change on polar bear populations."
+            test_abstract_3 = "A new algorithm for optimizing database queries using machine learning."
+            test_abstract_4 = "The Hamiltonian complexity of the quantum Ising model on a lattice."
+            test_abstract_5 = "Advances in protein folding prediction with AlphaFold."
+            test_abstract_6 = "An unrelated abstract about culinary arts."
 
-            # --- Parse Results ---
-            # Initialize results with default failure responses
-            parsed_responses: Dict[str, LLMResponse] = {}
-
-            for line_data in results_content:
-                custom_id = line_data.get("custom_id")
-                response_body = line_data.get("response", {}).get("body")
-                error_body = line_data.get("error")  # Check for per-request errors
-
-                content_str: Optional[str] = None
-                if not custom_id:
-                    logger.warning(f"Skipping result line with missing custom_id in batch {batch_id}.")
-                    continue
-
-                if error_body:
-                    err_msg = error_body.get("message", "Unknown error")
-                    logger.warning(f"Request {custom_id} in batch {batch_id} failed: {err_msg}")
-                    parsed_responses[custom_id] = LLMResponse(explanation=f"Request failed in batch: {err_msg}")
-                    continue
-
-                if not response_body:
-                    logger.warning(
-                        f"Skipping result line with missing response body for {custom_id} in batch {batch_id}."
-                    )
-                    parsed_responses[custom_id] = LLMResponse(explanation="Missing response body in batch result.")
-                    continue
-
-                try:
-                    content_str = response_body["choices"][0]["message"]["content"]
-
-                    # Explicitly check type before loading to satisfy linter
-                    if content_str is None:
-                        raise ValueError("Extracted content string is unexpectedly None after assignment.")
-
-                    result = json.loads(content_str)
-
-                    # Validate the parsed JSON
-                    if not all(k in result for k in ["is_relevant", "confidence", "explanation"]):
-                        raise ValueError("LLM response missing required keys.")
-                    if not isinstance(result["is_relevant"], bool):
-                        raise ValueError("'is_relevant' key must be a boolean.")
-                    if not isinstance(result["confidence"], (float, int)):
-                        raise ValueError("'confidence' key must be a number.")
-
-                    # Store the successful response
-                    parsed_responses[custom_id] = LLMResponse(
-                        is_relevant=result["is_relevant"],
-                        confidence=float(result["confidence"]),
-                        explanation=result["explanation"],
-                    )
-                except (json.JSONDecodeError, KeyError, ValueError, IndexError) as e:
-                    logger.warning(f"Error parsing/validating response for {custom_id} in batch {batch_id}: {e}")
-                    if content_str is not None:
-                        logger.warning(f"Problematic content for {custom_id}: {content_str}")
-                    parsed_responses[custom_id] = LLMResponse(
-                        explanation=f"Failed to parse/validate LLM response ({type(e).__name__})."
-                    )
-
-            # Map results back to the original order using custom_id
-            final_results = [
-                parsed_responses.get(f"req_{i}", LLMResponse(explanation="Result missing in batch output."))
-                for i in range(len(abstracts))
+            test_abstracts = [
+                test_abstract_1,
+                test_abstract_2,
+                test_abstract_3,
+                test_abstract_4,
+                test_abstract_5,
+                test_abstract_6,
             ]
-            return final_results
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP error during batch processing (Batch ID: {batch_id}): {e}", exc_info=True)
-            return [
-                LLMResponse(explanation=f"Batch processing failed: Network or API request error ({type(e).__name__}).")
-            ] * len(abstracts)
-        except Exception as e:
-            # Catch errors during polling, result fetching, or general logic
-            logger.error(f"Unexpected error during batch processing (Batch ID: {batch_id}): {e}", exc_info=True)
-            return [LLMResponse(explanation=f"Batch processing failed: Unexpected error ({type(e).__name__}).")] * len(
-                abstracts
-            )
-
-    def _poll_batch_and_get_results(
-        self, batch_id: str, poll_interval_sec: int = 5, timeout_minutes: int = 10
-    ) -> List[Dict[str, Any]]:
-        """Polls the Groq Batch API for completion status and retrieves results.
-
-        Args:
-            batch_id: The ID of the submitted batch request.
-            poll_interval_sec: How often to check the batch status (in seconds).
-            timeout_minutes: Maximum time to wait for the batch to complete.
-
-        Returns:
-            A list of dictionaries, where each dictionary represents a line
-            from the JSONL output file containing the result for a single request.
-
-        Raises:
-            TimeoutError: If the batch does not complete within the timeout period.
-            Exception: If the batch fails, is cancelled, or expires, or if there are
-                       HTTP errors during polling or result fetching.
-        """
-        start_time = datetime.now()
-        timeout_delta = timedelta(minutes=timeout_minutes)
-        batch_status_url = f"{self.batch_url}/{batch_id}"
-
-        logger.info(f"Polling batch status for {batch_id} every {poll_interval_sec}s (Timeout: {timeout_minutes}m)...")
-
-        while datetime.now() - start_time < timeout_delta:
-            try:
-                response = requests.get(batch_status_url, headers=self.headers, timeout=DEFAULT_REQUEST_TIMEOUT)
-                response.raise_for_status()
-                status_data = response.json()
-                current_status = status_data.get("status")
-
-                logger.debug(f"Batch {batch_id} status: {current_status}")
-
-                if current_status == "completed":
-                    logger.info(f"Batch {batch_id} completed. Retrieving results file...")
-                    output_file_id = status_data.get("output_file_id")
-                    if not output_file_id:
-                        raise ValueError("Batch completed but no output_file_id found.")
-
-                    # Retrieve the content of the results file
-                    results_content_url = f"{self.files_url}/{output_file_id}/content"
-                    results_response = requests.get(
-                        results_content_url, headers=self.headers, timeout=DEFAULT_REQUEST_TIMEOUT
+            test_prompt_batch = "Is this paper relevant to computational physics, quantum computing, or machine learning applied to science?"
+            logger.info(f"--- Testing Batch Relevance Check (Size={checker.batch_size}) ---")
+            responses_batch = checker.check_relevance_batch(test_abstracts, test_prompt_batch)
+            logger.info(f"Test Prompt: {test_prompt_batch}")
+            if len(responses_batch) == len(test_abstracts):
+                for i, resp in enumerate(responses_batch):
+                    logger.info(
+                        f"  Abstract {i + 1}: Relevant={resp.is_relevant}, Conf={resp.confidence:.2f}, Expl='{resp.explanation}'"
                     )
-                    results_response.raise_for_status()
+            else:
+                logger.error(f"Batch test failed: Expected {len(test_abstracts)} responses, got {len(responses_batch)}")
+                for i, resp in enumerate(responses_batch):
+                    logger.info(
+                        f"  Response {i + 1}: Relevant={resp.is_relevant}, Conf={resp.confidence:.2f}, Expl='{resp.explanation}'"
+                    )
 
-                    # Parse the JSONL content (one JSON object per line)
-                    results_list = []
-                    for line in results_response.text.strip().split("\n"):
-                        if line:
-                            try:
-                                results_list.append(json.loads(line))
-                            except json.JSONDecodeError as json_e:
-                                logger.warning(
-                                    f"Failed to parse line in results file for batch {batch_id}: {json_e}. Line: '{line}'"
-                                )
-                    logger.info(f"Successfully retrieved and parsed {len(results_list)} results for batch {batch_id}.")
-                    return results_list
-
-                elif current_status in ["failed", "expired", "cancelled"]:
-                    error_details = status_data.get("error", {}).get("message", "Unknown error")
-                    logger.error(f"Batch {batch_id} processing {current_status}: {error_details}")
-                    raise Exception(f"Batch {batch_id} {current_status}: {error_details}")
-                elif current_status == "validating":
-                    logger.debug(f"Batch {batch_id} is validating input...")
-                elif current_status == "in_progress":
-                    logger.debug(f"Batch {batch_id} is in progress...")
-                # Add other potential statuses if needed (e.g., 'queued')
-
-            except requests.exceptions.RequestException as e:
-                # Handle transient network errors during polling differently?
-                # For now, log and potentially raise to signal batch failure.
-                logger.error(f"HTTP error polling status for batch {batch_id}: {e}")
-                raise  # Re-raise to be caught by the caller
-
-            # Wait before the next poll
-            time.sleep(poll_interval_sec)
-
-        # If the loop finishes without returning, it timed out
-        logger.error(f"Batch {batch_id} processing timed out after {timeout_minutes} minutes.")
-        raise TimeoutError(f"Groq batch processing for {batch_id} timed out after {timeout_minutes} minutes.")
+        except GroqError as ge:
+            logger.error(f"Test failed due to Groq API error: {ge}")
+        except Exception as e:
+            logger.error(f"Test failed due to unexpected error: {e}", exc_info=True)
