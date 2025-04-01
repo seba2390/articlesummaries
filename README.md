@@ -2,7 +2,7 @@
 
 ## 📝 Description
 
-This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers submitted or updated within the last 24 hours across specified categories, filters them based on relevance (currently keyword matching in title/abstract), and appends the details of relevant papers to an output file.
+This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers submitted or updated within the last 24 hours across specified categories, filters them based on relevance (using keyword matching or LLM-based relevance checking), and appends the details of relevant papers to an output file.
 
 The application runs on a daily schedule and is designed with a modular structure, making it easy to extend with new paper sources, different filtering mechanisms, or alternative output methods.
 
@@ -12,7 +12,8 @@ The application runs on a daily schedule and is designed with a modular structur
 *   **Recent Paper Fetching:** Focuses on papers submitted/updated within the last 24 hours (relative to script run time).
 *   **Total Results Limit:** Set a maximum total number of papers to fetch (`max_total_results`) as a safeguard.
 *   **Daily Scheduling:** Automatically checks for new papers at a configurable time each day using the `schedule` library.
-*   **Keyword Filtering:** Filters papers based on the presence of keywords in the title or abstract.
+*   **Flexible Filtering:** Choose between keyword-based filtering or LLM-based relevance checking using Groq's API.
+*   **Batch Processing:** Option to process papers in batches for improved efficiency with LLM-based checking.
 *   **File Output:** Appends details of relevant papers (ID, Title, Authors, URL, Abstract, Updated Date) to a specified text file.
 *   **Structured Console Output:** Provides clear, formatted logging during execution.
 *   **Modular Design:** Easily extensible with new paper sources, filters, or output handlers using Abstract Base Classes (ABCs).
@@ -35,10 +36,10 @@ articlesummaries/
 ├── src/                    # Source code directory
 │   ├── __init__.py
 │   ├── config_loader.py    # Handles loading config.yaml
-│   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
 │   │   ├── base_filter.py  # ABC for filters
 │   │   └── keyword_filter.py # Keyword filtering implementation
+│   ├── llm_relevance.py    # LLM-based relevance checking
 │   ├── output/             # Modules for handling output
 │   │   ├── __init__.py
 │   │   ├── base_output.py  # ABC for output handlers
@@ -91,13 +92,160 @@ articlesummaries/
 
 ## ⚙️ Configuration
 
-Edit the `config.yaml` file to customize the monitor's behavior:
+The `config.yaml` file controls all aspects of the application. Here's a detailed breakdown of all available settings:
 
-*   `categories`: A list of arXiv category identifiers (e.g., `cs.AI`, `math.AP`). Find categories [here](https://arxiv.org/category_taxonomy).
-*   `keywords`: A list of keywords to search for (case-insensitive) in paper titles and abstracts.
-*   `max_total_results`: The maximum total number of papers (most recently submitted/updated) to fetch across *all* specified categories in a single run. This acts as a safeguard against fetching an excessive number of papers if the daily volume is very high.
-*   `run_time_daily`: The time of day (HH:MM format, 24-hour clock) to run the check.
-*   `output_file`: The path to the file where relevant paper details will be appended.
+### Paper Source Configuration
+```yaml
+paper_source:
+  arxiv:
+    categories: ["cs.AI", "cs.LG"]  # List of arXiv categories to monitor
+    keywords: ["machine learning", "neural networks"]  # Keywords for filtering
+    max_total_results: 100  # Maximum papers to fetch per run
+    sort_by: "submittedDate"  # Sort papers by submission date
+    sort_order: "descending"  # Get newest papers first
+```
+
+### Relevance Checking Configuration
+```yaml
+relevance_checker:
+  type: "keyword"  # or "llm"
+
+  # For keyword-based checking (type: "keyword")
+  keywords: ["machine learning", "neural networks"]  # Keywords to match
+
+  # For LLM-based checking (type: "llm")
+  llm:
+    provider: "groq"  # Currently supports "groq" or "custom"
+    api_key: "your-groq-api-key"  # Required for Groq
+    model: "llama-3.1-8b-instant"  # Groq model to use
+    prompt: "Is this paper relevant to machine learning research?"  # Custom prompt
+    confidence_threshold: 0.7  # Minimum confidence (0-1) to consider relevant
+
+    # For custom LLM provider
+    custom:
+      module_path: "path.to.your.module"  # Python module path
+      class_name: "YourLLMChecker"  # Class name in the module
+```
+
+### Output Configuration
+```yaml
+output:
+  file: "relevant_papers.txt"  # Output file path
+  format: "markdown"  # or "plain"
+  include_confidence: true  # Include LLM confidence scores
+  include_explanation: true  # Include LLM explanations
+```
+
+### Scheduling Configuration
+```yaml
+schedule:
+  run_time: "09:00"  # Daily run time (24-hour format)
+  timezone: "UTC"  # Timezone for run time
+```
+
+## 🚀 Extensibility
+
+The application is designed to be easily extended with new paper sources and LLM checkers. Here's how to add your own implementations:
+
+### Adding a New Paper Source
+
+1. Create a new file in `src/paper_sources/` (e.g., `custom_source.py`):
+```python
+from .base_source import BasePaperSource
+from ..paper import Paper
+
+class CustomPaperSource(BasePaperSource):
+    def configure(self, config: Dict[str, Any]) -> None:
+        """Configure the source with settings from config.yaml."""
+        self.settings = config["paper_source"]["custom"]
+
+    def fetch_papers(self) -> List[Paper]:
+        """Fetch papers from your custom source."""
+        # Implement your paper fetching logic here
+        papers = []
+        # ... fetch papers from your source ...
+        return papers
+```
+
+2. Update `src/paper_sources/__init__.py`:
+```python
+from .custom_source import CustomPaperSource
+
+__all__ = ["ArxivSource", "CustomPaperSource"]
+```
+
+3. Add configuration in `config.yaml`:
+```yaml
+paper_source:
+  custom:
+    # Your custom source settings
+```
+
+### Adding a New LLM Checker
+
+1. Create a new file in `src/llm/` (e.g., `custom_checker.py`):
+```python
+from .base_checker import BaseLLMChecker, LLMResponse
+
+class CustomLLMChecker(BaseLLMChecker):
+    def __init__(self, api_key: str):
+        """Initialize your LLM checker."""
+        self.api_key = api_key
+        # ... setup your LLM client ...
+
+    def check_relevance(self, abstract: str, prompt: str) -> LLMResponse:
+        """Check relevance using your LLM."""
+        # Implement single paper checking
+        return LLMResponse(
+            is_relevant=True,
+            confidence=0.8,
+            explanation="Your explanation"
+        )
+
+    def check_relevance_batch(self, abstracts: List[str], prompt: str) -> List[LLMResponse]:
+        """Check relevance for multiple papers."""
+        # Implement batch checking
+        return [self.check_relevance(abstract, prompt) for abstract in abstracts]
+```
+
+2. Update `src/llm/__init__.py`:
+```python
+from .custom_checker import CustomLLMChecker
+
+__all__ = ["BaseLLMChecker", "LLMResponse", "GroqChecker", "CustomLLMChecker"]
+```
+
+3. Add configuration in `config.yaml`:
+```yaml
+relevance_checker:
+  type: "llm"
+  llm:
+    provider: "custom"
+    custom:
+      module_path: "src.llm.custom_checker"
+      class_name: "CustomLLMChecker"
+```
+
+### Testing Your Extensions
+
+1. Create test files in the appropriate `tests/` directory:
+```python
+# tests/paper_sources/test_custom_source.py
+def test_custom_source():
+    source = CustomPaperSource()
+    # ... test your implementation ...
+
+# tests/llm/test_custom_checker.py
+def test_custom_checker():
+    checker = CustomLLMChecker("test-key")
+    # ... test your implementation ...
+```
+
+2. Run the tests:
+```bash
+pytest tests/paper_sources/test_custom_source.py
+pytest tests/llm/test_custom_checker.py
+```
 
 ## ▶️ Usage
 
@@ -122,23 +270,6 @@ The project includes a test suite using `pytest`. To run the tests:
     ```bash
     pytest -v
     ```
-
-## 🚀 Extensibility
-
-The use of Abstract Base Classes (`src/paper_sources/base_source.py`, `src/filtering/base_filter.py`, `src/output/base_output.py`) makes extending the application straightforward:
-
-1.  **Add a New Paper Source:**
-    *   Create a new class in `src/paper_sources/` that inherits from `BasePaperSource`.
-    *   Implement the `configure` and `fetch_papers` methods. `fetch_papers` should return a list of `src.paper.Paper` objects.
-    *   Modify `main.py` to instantiate and use your new source (potentially based on configuration).
-2.  **Add a New Filter:**
-    *   Create a new class in `src/filtering/` inheriting from `BaseFilter`.
-    *   Implement `configure` and `filter`. The `filter` method takes a list of `Paper` objects and returns a filtered list.
-    *   Modify `main.py` to use your new filter.
-3.  **Add a New Output Handler:**
-    *   Create a new class in `src/output/` inheriting from `BaseOutput`.
-    *   Implement `configure` and `output`. The `output` method receives the list of relevant `Paper` objects.
-    *   Modify `main.py` to use your new output handler.
 
 ## 📦 Dependencies
 

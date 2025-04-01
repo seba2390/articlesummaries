@@ -25,3 +25,34 @@ run_time_daily: "08:00"
 
 # File to store relevant papers (optional, creates if it doesn't exist)
 output_file: "relevant_papers.txt"
+
+# Paper source configuration
+paper_source:
+  type: "arxiv"  # Options: arxiv
+  arxiv:
+    categories: ["cs.AI", "cs.LG", "cs.CL"]  # arXiv categories to monitor
+    keywords: ["large language model", "transformer", "attention"]  # Keywords to filter papers
+    fetch_window: 24  # Hours to look back for papers
+
+# Relevance checking configuration
+relevance_checker:
+  type: "keyword"  # Options: keyword, llm
+  llm:
+    provider: "groq"  # Options: groq, custom
+    api_key: ""  # Your Groq API key (optional if using custom provider)
+    model: "llama-3.1-8b-instant"  # Groq model to use
+    prompt: "Is this paper relevant to my research on large language models and their applications in natural language processing? Consider both technical depth and practical implications."
+    batch_size: 10  # Number of papers to process in each batch (0 for no batching)
+    confidence_threshold: 0.7  # Minimum confidence score to consider a paper relevant
+
+# Output configuration
+output:
+  file: "relevant_papers.txt"  # File to save relevant papers
+  format: "markdown"  # Output format (markdown, plain)
+  include_confidence: true  # Whether to include confidence scores in output
+  include_explanation: true  # Whether to include LLM explanations in output
+
+# Schedule configuration
+schedule:
+  run_time: "09:00"  # Daily run time (24-hour format)
+  timezone: "UTC"  # Timezone for run time
