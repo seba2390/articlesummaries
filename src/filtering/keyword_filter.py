@@ -28,29 +28,41 @@ class KeywordFilter(BaseFilter):
     def configure(self, config: Dict[str, Any]):
         """Configures the filter by loading keywords from the application config.
 
-        Reads keywords from `config['paper_source']['arxiv']['keywords']`.
+        Dynamically finds the relevant keywords list within the provided config's
+        `paper_source` section, assuming the config structure passed contains the
+        keywords for the intended source.
         Keywords are converted to lowercase for case-insensitive matching.
         Logs a warning if no keywords are found in the configuration.
 
         Args:
-            config: The main application configuration dictionary.
+            config: The configuration dictionary (can be the full config or
+                    a temporary one containing a specific source's keywords).
         """
-        # Navigate the config structure to find the keywords list
-        # Uses .get() with defaults to avoid KeyErrors if structure is missing
-        arxiv_config = config.get("paper_source", {}).get("arxiv", {})
-        keywords_raw = arxiv_config.get("keywords", [])  # Get list or empty list
+        self.keywords = []  # Reset keywords
+        keywords_found = False
+        source_used = "unknown"
 
-        # Ensure keywords are strings and lowercase them for consistent matching
-        self.keywords = [str(kw).lower() for kw in keywords_raw if kw]  # Added check for empty strings
+        paper_source_config = config.get("paper_source", {})
+        if isinstance(paper_source_config, dict):
+            # Iterate through potential sources in the passed config
+            for source_name, source_settings in paper_source_config.items():
+                if isinstance(source_settings, dict):
+                    keywords_raw = source_settings.get("keywords", [])
+                    if keywords_raw:
+                        # Found keywords, use them and stop looking
+                        self.keywords = [str(kw).lower() for kw in keywords_raw if kw]
+                        keywords_found = True
+                        source_used = source_name
+                        break  # Stop after finding the first set of keywords
 
         # Log the outcome of configuration
-        if not self.keywords:
+        if not keywords_found:
             logger.warning(
-                "KeywordFilter configured with no valid keywords found in config['paper_source']['arxiv']['keywords']. "
-                "The filter will pass all papers."
+                "KeywordFilter configured, but no valid 'keywords' list found within the provided config's 'paper_source' section. "
+                "The filter will pass all papers in this context."
             )
         else:
-            logger.info(f"KeywordFilter configured with keywords: {self.keywords}")
+            logger.info(f"KeywordFilter configured for source '{source_used}' with keywords: {self.keywords}")
 
     def filter(self, papers: List[Paper]) -> List[Paper]:
         """Filters the provided list of papers based on configured keywords.

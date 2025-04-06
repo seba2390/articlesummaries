@@ -2,8 +2,7 @@
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
-from datetime import time as dt_time
+from datetime import datetime
 from typing import Any, Dict, List
 
 import arxiv
@@ -25,27 +24,50 @@ class ArxivSource(BasePaperSource):
     """
 
     DEFAULT_MAX_RESULTS = 500  # Default limit if not specified in config
+    DEFAULT_FETCH_WINDOW_DAYS = 1  # Default days to look back if not specified or invalid
 
     def __init__(self):
         """Initializes ArxivSource with empty categories and default max results."""
         self.categories: List[str] = []
         self.max_total_results: int = self.DEFAULT_MAX_RESULTS
+        self.fetch_window_days: int = self.DEFAULT_FETCH_WINDOW_DAYS  # Add fetch window attribute
 
     def configure(self, config: Dict[str, Any]):
-        """Configures the ArxivSource with categories and result limits.
+        """Configures the ArxivSource with categories, result limits, and fetch window.
 
         Reads the following keys from the provided configuration dictionary:
-          - `config['paper_source']['arxiv']['categories']`: List of arXiv category strings (e.g., ["cs.AI", "stat.ML"]).
-          - `config['max_total_results']`: Maximum number of results to request from the API per run (top-level setting).
+          - `config['paper_source']['arxiv']['categories']`: List of arXiv category strings.
+          - `config['paper_source']['arxiv']['fetch_window']`: Number of days to look back for papers.
+          - `config['max_total_results']`: Maximum number of results to request from the API per run.
 
         Args:
             config: The main application configuration dictionary.
         """
-        # Read categories from the nested structure: paper_source -> arxiv -> categories
+        # Read categories and fetch window from the nested structure
         arxiv_config = config.get("paper_source", {}).get("arxiv", {})
         self.categories = arxiv_config.get("categories", [])
 
-        # Read max_total_results from the top-level config, using the class default if missing
+        # Read fetch_window, validate, and store
+        fetch_window_config = arxiv_config.get("fetch_window", self.DEFAULT_FETCH_WINDOW_DAYS)
+        try:
+            fetch_window_int = int(fetch_window_config)
+            if fetch_window_int > 0:
+                self.fetch_window_days = fetch_window_int
+                logger.info(f"Fetch window configured to {self.fetch_window_days} days.")
+            else:
+                logger.warning(
+                    f"Configured fetch_window ({fetch_window_config}) is not a positive integer. "
+                    f"Using default: {self.DEFAULT_FETCH_WINDOW_DAYS} days."
+                )
+                self.fetch_window_days = self.DEFAULT_FETCH_WINDOW_DAYS
+        except (ValueError, TypeError):
+            logger.warning(
+                f"Configured fetch_window ({fetch_window_config}) is not a valid integer. "
+                f"Using default: {self.DEFAULT_FETCH_WINDOW_DAYS} days."
+            )
+            self.fetch_window_days = self.DEFAULT_FETCH_WINDOW_DAYS
+
+        # Read max_total_results from the top-level config
         self.max_total_results = config.get("max_total_results", self.DEFAULT_MAX_RESULTS)
 
         # Log warnings or info based on configuration
@@ -58,12 +80,16 @@ class ArxivSource(BasePaperSource):
             logger.info(f"ArxivSource configured for categories: {self.categories}")
         logger.info(f"Maximum total results to fetch per run (max_total_results): {self.max_total_results}")
 
-    def fetch_papers(self) -> List[Paper]:
-        """Fetches papers from arXiv that were last updated on the previous calendar day (UTC).
+    def fetch_papers(self, start_time_utc: datetime, end_time_utc: datetime) -> List[Paper]:
+        """Fetches papers from arXiv that were last updated within the given time window.
 
-        Constructs an arXiv API query based on configured categories and the date range.
-        Uses the `arxiv` library to perform the search and converts the results
+        Constructs an arXiv API query based on configured categories and the provided date range
+        (in UTC). Uses the `arxiv` library to perform the search and converts the results
         into a list of `Paper` objects.
+
+        Args:
+            start_time_utc: The start of the time window (inclusive, UTC).
+            end_time_utc: The end of the time window (inclusive, UTC).
 
         Returns:
             A list of `Paper` objects fetched from arXiv, or an empty list if no
@@ -74,20 +100,18 @@ class ArxivSource(BasePaperSource):
             logger.info("Skipping arXiv fetch: No categories configured.")
             return []
 
-        # --- Calculate Date Range: Previous Full Day in UTC ---
-        # Get current date in UTC timezone
-        today_utc = datetime.now(timezone.utc).date()
-        # Calculate the date for the previous day
-        yesterday_utc = today_utc - timedelta(days=1)
-        # Define the start (00:00:00) and end (23:59:59) of the previous day in UTC
-        start_dt_utc = datetime.combine(yesterday_utc, dt_time.min, tzinfo=timezone.utc)
-        end_dt_utc = datetime.combine(yesterday_utc, dt_time.max, tzinfo=timezone.utc)
+        # --- Use provided Date Range ---
         # Format dates for the arXiv API query string (YYYYMMDDHHMMSS)
-        start_str = start_dt_utc.strftime("%Y%m%d%H%M%S")
-        end_str = end_dt_utc.strftime("%Y%m%d%H%M%S")
+        start_str = start_time_utc.strftime("%Y%m%d%H%M%S")
+        end_str = end_time_utc.strftime("%Y%m%d%H%M%S")
+
         # Construct the date part of the query
         date_query = f"lastUpdatedDate:[{start_str} TO {end_str}]"
-        logger.info(f"Querying arXiv for papers last updated on: {yesterday_utc.strftime('%Y-%m-%d')} UTC")
+        logger.info(
+            f"Querying arXiv for papers last updated between: "
+            f"{start_time_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC and "
+            f"{end_time_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC."
+        )
 
         # --- Construct Full Query ---
         # Combine category queries with OR
@@ -109,7 +133,13 @@ class ArxivSource(BasePaperSource):
         try:
             # Initialize the search object
             # We don't sort by date here, as the `lastUpdatedDate` query handles the filtering.
-            search = arxiv.Search(query=search_query, max_results=self.max_total_results)
+            # Sort by 'lastUpdatedDate' descending to potentially get newest first if limit hit?
+            search = arxiv.Search(
+                query=search_query,
+                max_results=self.max_total_results,
+                sort_by=arxiv.SortCriterion.LastUpdatedDate,  # Add sorting
+                sort_order=arxiv.SortOrder.Descending,  # Add sorting order
+            )
             # Get the results generator from the search object
             results_generator = search.results()
 
@@ -140,7 +170,8 @@ class ArxivSource(BasePaperSource):
         if len(fetched_results) >= self.max_total_results:
             logger.warning(
                 f"Reached or exceeded the fetch limit ({self.max_total_results}). "
-                f"Some papers updated on {yesterday_utc.strftime('%Y-%m-%d')} might have been missed."
+                f"Some papers updated between {start_time_utc.strftime('%Y-%m-%d %H:%M:%S')} and "
+                f"{end_time_utc.strftime('%Y-%m-%d %H:%M:%S')} might have been missed."  # Update warning message
             )
 
         # --- Process Results ---
@@ -157,7 +188,9 @@ class ArxivSource(BasePaperSource):
                 seen_ids.add(paper_id)
             # else: logger.debug(f"Skipping duplicate paper ID encountered in results: {paper_id}")
 
-        logger.info(f"Processed {len(papers_processed)} unique papers from the target date.")
+        logger.info(
+            f"Processed {len(papers_processed)} unique papers from the target date range."
+        )  # Update log message
 
         # --- Convert to Internal Format ---
         # Map the fields from arxiv.Result objects to our internal Paper dataclass.

@@ -1,6 +1,7 @@
 """Defines the abstract base class for all paper sources."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any, Dict, List
 
 # Keep direct import as Paper is essential for this module
@@ -18,10 +19,14 @@ class BasePaperSource(ABC):
     sources in a consistent way, promoting modularity and extensibility.
     """
 
+    DEFAULT_FETCH_WINDOW_DAYS = 1  # Define a default constant
+
     @abstractmethod
     def __init__(self):
         """Abstract initializer for paper sources."""
         # Concrete implementations should initialize their specific attributes here.
+        # Add fetch_window_days with a default value
+        self.fetch_window_days: int = self.DEFAULT_FETCH_WINDOW_DAYS
         pass
 
     @abstractmethod
@@ -40,14 +45,19 @@ class BasePaperSource(ABC):
         raise NotImplementedError  # Ensure subclasses implement this
 
     @abstractmethod
-    def fetch_papers(self) -> List[Paper]:
-        """Fetches papers from the configured source according to its settings.
+    def fetch_papers(self, start_time_utc: datetime, end_time_utc: datetime) -> List[Paper]:
+        """Fetches papers from the configured source within a specified time window.
 
         Subclasses must implement this method to perform the core logic of:
         1. Interacting with the external source (e.g., querying an API).
-        2. Retrieving paper data based on the configuration set in `configure`.
+        2. Retrieving paper data based on the configuration set in `configure`,
+           filtered by the provided `start_time_utc` and `end_time_utc`.
         3. Converting the retrieved data into a list of standardized `Paper` objects.
         4. Handling potential errors during the fetching process gracefully.
+
+        Args:
+            start_time_utc: The start of the time window (inclusive, UTC).
+            end_time_utc: The end of the time window (inclusive, UTC).
 
         Returns:
             A list of `Paper` objects fetched from the source. Returns an empty

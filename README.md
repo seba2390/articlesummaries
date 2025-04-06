@@ -1,83 +1,90 @@
-![arXiv Paper Monitor Logo](assets/logo_1.png)
+# Multi-Source Paper Monitor
 
-## 📝 Description
+![Paper Monitor Logo](assets/logo_1.png)
 
-This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers updated on the previous calendar day across specified categories, checks their relevance (using keyword matching or LLM-based assessment via Groq), outputs the findings to a file, and can send an email summary containing the details of relevant papers.
+## 📝 Overview
 
-The application runs on a daily schedule and is designed with a modular structure.
+This project provides a configurable Python application to monitor publications from multiple academic sources, currently supporting **arXiv** and **bioRxiv/medRxiv**. It automatically fetches recent papers across specified categories, checks their relevance based on configured methods (keywords or LLM), outputs the findings to a file, and sends comprehensive email summaries.
+
+The application runs on a daily schedule defined in the configuration and features a modular design for potential extension.
 
 ## ✨ Features
 
-*   **Configurable Monitoring:** Define arXiv categories and fetch limits in `config.yaml`.
-*   **Previous Day Fetching:** Fetches arXiv papers last updated on the previous calendar day (UTC).
-*   **Flexible Relevance Checking:** Choose the checking method via `relevance_checking_method` in `config.yaml`:
-    *   `"keyword"`: Filters papers based on keywords (defined per source) found in the title/abstract.
-    *   `"llm"`: Uses Groq's API (requires API key) for advanced relevance assessment based on a custom prompt.
-*   **Groq Batch Processing:** Leverages Groq's batch API internally for efficient LLM processing when the `llm` method is selected.
-*   **Email Summaries:** Optionally sends beautifully formatted HTML email summaries of each run, embedding relevant paper details (title, link, authors, categories, keywords/LLM info, abstract).
-*   **Configurable Output File:** Appends relevant paper details to a text file in Markdown or plain text format.
-*   **Daily Scheduling:** Runs automatically at a configurable time and timezone.
-*   **Progress Indicator:** Uses `tqdm` to show progress during arXiv API result processing.
-*   **Structured Logging:** Provides clear console output.
-*   **Modular Design:** Extensible with new paper sources, filtering logic, relevance checkers, or output/notification methods (via ABCs).
-*   **Tested:** Includes `pytest` tests with options to skip external API calls.
+*   **Multi-Source Monitoring:** Fetches papers from arXiv and bioRxiv/medRxiv based on settings in `config.yaml`.
+*   **Source-Specific Configuration:** Define categories, keywords (for filtering), and fetch windows (days to look back) independently for each source.
+*   **Flexible Relevance Checking:**
+    *   `"keyword"`: Filters papers using source-specific keyword lists against titles/abstracts.
+    *   `"llm"`: Utilizes Groq's API (requires API key) for advanced relevance assessment based on a custom prompt and confidence threshold.
+    *   `"none"`: Treats all fetched papers as relevant.
+*   **Efficient LLM Processing:** Leverages Groq's API with batching and configurable delays for the `llm` method.
+*   **Detailed Email Summaries:** Sends HTML emails summarizing each run, including source-specific fetch statistics (count, window, query times) and details of relevant papers (title, link, authors, categories, matched keywords/LLM info, abstract).
+*   **File Output:** Appends relevant paper details to a configurable file (`markdown` or `plain` text format), optionally including LLM metadata.
+*   **Scheduled Execution:** Runs automatically via `schedule` library at a configurable time and timezone.
+*   **Progress Indicators:** Uses `tqdm` for visual feedback during API calls.
+*   **Structured Logging:** Provides informative console output.
+*   **Modular & Tested:** Built with Abstract Base Classes (ABCs) and includes `pytest` tests (with markers to skip external API calls).
 
 ## 📁 Project Structure
 
-```
+```plaintext
 articlesummaries/
-├── .git/                   # Git repository data
-├── .gitignore              # Files/directories ignored by Git
-├── .pytest_cache/          # Pytest cache directory
-├── __pycache__/            # Python bytecode cache (and in subdirs)
-├── config.yaml             # Configuration file
-├── main.py                 # Main script to run the monitor
-├── pytest.ini              # Pytest configuration (defines markers like 'llm')
+├── .gitignore
+├── config.yaml             # --- Configuration File --- (*Create this*)
+├── main.py                 # Main execution script
+├── pytest.ini              # Pytest configuration (markers)
 ├── README.md               # This file
-├── relevant_papers.txt     # Default output file (created/appended)
 ├── requirements.txt        # Python dependencies
-├── src/                    # Source code directory
+├── assets/                 # Assets (e.g., logo)
+│   └── logo_1.png
+├── src/                    # --- Source Code ---
 │   ├── __init__.py
-│   ├── config_loader.py    # Handles loading config.yaml
+│   ├── config_loader.py    # Loads config.yaml
+│   ├── paper.py            # Defines the Paper data class
+│   ├── scheduler.py        # Handles job scheduling
+│   ├── paper_sources/      # Modules for fetching papers
+│   │   ├── __init__.py
+│   │   ├── base_source.py  # ABC for paper sources
+│   │   ├── arxiv_source.py # arXiv implementation
+│   │   └── biorxiv_source.py # bioRxiv/medRxiv implementation
+│   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
 │   │   ├── base_filter.py  # ABC for filters
 │   │   └── keyword_filter.py # Keyword filtering implementation
 │   ├── llm/                # Modules for LLM relevance checking
 │   │   ├── __init__.py
-│   │   ├── base_checker.py # ABC for relevance checkers
+│   │   ├── base_checker.py # ABC for LLM checkers
 │   │   └── groq_checker.py # Groq implementation
 │   ├── notifications/      # Modules for sending notifications
 │   │   ├── __init__.py
-│   │   ├── base_notification.py # ABC for notifications
+│   │   ├── base_notification.py # (Not currently used, placeholder ABC)
 │   │   └── email_sender.py # Email summary implementation
-│   ├── output/             # Modules for handling output
-│   │   ├── __init__.py
-│   │   ├── base_output.py  # ABC for output handlers
-│   │   └── file_writer.py  # File writing implementation
-│   ├── paper_sources/      # Modules for fetching papers
-│   │   ├── __init__.py
-│   │   ├── base_source.py  # ABC for paper sources
-│   │   └── arxiv_source.py # arXiv implementation
-│   ├── paper.py            # Defines the Paper data structure
-│   └── scheduler.py        # Handles job scheduling
-├── tests/                  # Test suite directory
+│   └── output/             # Modules for handling output
+│       ├── __init__.py
+│       ├── base_output.py  # ABC for output handlers
+│       └── file_writer.py  # File writing implementation
+├── tests/                  # --- Test Suite ---
 │   ├── __init__.py
 │   ├── filtering/
 │   │   └── test_keyword_filter.py
 │   ├── llm/
 │   │   └── test_groq_checker.py
 │   ├── notifications/
-│   │   └── test_email_sender.py # Tests for email functionality
+│   │   └── test_email_sender.py
 │   ├── output/
 │   │   └── test_file_writer.py
 │   ├── paper_sources/
-│   │   └── test_arxiv_source.py
+│   │   ├── test_arxiv_source.py
+│   │   └── test_biorxiv_source.py
 │   ├── test_config_loader.py
 │   ├── test_main.py
 │   └── test_scheduler.py
 └── venv/                   # Virtual environment (if created)
+
+# Generated at runtime (usually gitignored):
+# relevant_papers.txt     # Example default output file
+# .pytest_cache/
+# __pycache__/
 ```
-*Note: Cache directories (`__pycache__`, `.pytest_cache`), `venv`, and the output file (`relevant_papers.txt` or custom) are typically generated during setup/runtime and might be in your `.gitignore`.*
 
 ## 🛠️ Setup and Installation
 
@@ -86,194 +93,190 @@ articlesummaries/
     git clone <your-repo-url>
     cd articlesummaries
     ```
-2.  **Create and activate a virtual environment (recommended):**
+2.  **Create and activate a virtual environment (Recommended):**
     ```bash
-    # For macOS/Linux
+    # macOS / Linux
     python3 -m venv venv
     source venv/bin/activate
 
-    # For Windows
+    # Windows
     python -m venv venv
     .\venv\Scripts\activate
     ```
-3.  **Install dependencies:**
+3.  **Install Dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
+4.  **Create and Configure `config.yaml`:** Copy the example structure below into a `config.yaml` file in the project root and customize it.
 
 ## ⚙️ Configuration (`config.yaml`)
 
-This file controls the application's behavior. See comments within the file for detailed explanations. Create `config.yaml` in the project root if it doesn't exist, using the structure below as a template.
+This file controls the application's behavior. See the comments within the example and the guide below for details.
 
 ```yaml
-# Configuration file for arXiv Paper Monitor
+# ==========================================
+# Multi-Source Paper Monitor Configuration
+# ==========================================
 
-# Maximum total number of papers to fetch from arXiv in a single run.
-# This limits the results returned by the arXiv API query for the specified categories
-# and date range. Acts as a safeguard.
+# --- Global Settings ---
+
+# List of sources to activate for fetching. Corresponds to keys under 'paper_source'.
+# Example: ["arxiv", "biorxiv"]
+active_sources: ["arxiv", "biorxiv"]
+
+# Default number of days to look back for papers if not specified per source.
+# Each source uses this or its own 'fetch_window' setting.
+global_fetch_window_days: 4
+
+# (Used by arXiv) Maximum total number of papers to fetch from arXiv API per run.
+# Acts as a safeguard against excessively large result sets.
 max_total_results: 500
 
-# --- Relevance Checking Method ---
-# Determines the overall method used for checking paper relevance.
-# Options: "keyword" or "llm"
+# --- Relevance Checking ---
+
+# Method to determine relevance: "keyword", "llm", or "none".
 relevance_checking_method: "keyword"
 
-# --- Paper Source Configuration ---
-paper_source:
-  type: "arxiv" # Currently only supports arXiv
-  arxiv:
-    # ArXiv categories to search (e.g., cs.AI, cs.LG, math.AP)
-    # Find categories here: https://arxiv.org/category_taxonomy
-    categories: ["cs.AI", "cs.LG", "cs.CL"]
-
-    # Keywords specifically for filtering papers fetched from this arXiv source
-    # Used ONLY when relevance_checking_method is "keyword".
-    keywords: ["large language model", "transformer", "attention"]
-
-# --- Relevance Checker Specific Settings ---
-# Contains settings used by the different relevance checking methods.
+# Settings used only when relevance_checking_method is "llm".
 relevance_checker:
-  # Settings used when relevance_checking_method is "llm"
   llm:
-    # Currently only "groq" provider is implemented.
-    provider: "groq"
-
-    # Settings specific to the "groq" provider
+    provider: "groq" # Currently only "groq" is implemented.
     groq:
       # REQUIRED if provider is "groq". Get from https://console.groq.com/keys
-      # SECURITY: Consider using environment variables (e.g., GROQ_API_KEY) instead!
-      api_key: "YOUR_GROQ_API_KEY" # Replace with your key or remove if using env var
-      # Optional: Specify a Groq model. Defaults internally to llama-3.1-8b-instant.
-      # model: "llama-3.1-8b-instant"
-      # The prompt used to ask the LLM about relevance.
-      prompt: "Based on the abstract, is this paper relevant to the field of generative AI models?"
-      # Minimum confidence score (0.0 to 1.0) from the LLM to consider a paper relevant.
-      confidence_threshold: 0.7
+      # SECURITY: Use GROQ_API_KEY environment variable instead of hardcoding here.
+      api_key: "YOUR_GROQ_API_KEY"
+      # Optional: Specify Groq model. Defaults to 'llama-3.1-8b-instant'.
+      # model: "mixtral-8x7b-32768"
+      prompt: "Is this paper relevant to machine learning agents and reinforcement learning?"
+      confidence_threshold: 0.7 # Minimum confidence score (0.0-1.0) to consider relevant.
+      batch_size: 10 # Number of abstracts to process per API call.
+      batch_delay_seconds: 2 # Seconds to wait between batch API calls.
 
-# --- Output Configuration ---
+# --- Paper Source Specific Settings ---
+paper_source:
+
+  # Settings for arXiv
+  arxiv:
+    # ArXiv categories: https://arxiv.org/category_taxonomy
+    categories:
+      - cs.AI
+      - cs.CV
+      - cs.LG
+      - stat.ML
+    # Keywords for filtering arXiv papers (if method is "keyword"). Case-insensitive.
+    keywords:
+      - agent
+      - "foundation model"
+      - diffusion
+      - transformer
+    # Optional: Override global_fetch_window_days for this source.
+    fetch_window: 7
+
+  # Settings for bioRxiv / medRxiv
+  biorxiv:
+    server: "biorxiv" # Can be "biorxiv" or "medrxiv"
+    # Categories: https://www.biorxiv.org/collection (Case-sensitive, use spaces)
+    categories:
+      - Biochemistry
+      - Bioinformatics
+      - Neuroscience
+      - Plant Biology
+    # Keywords for filtering bioRxiv/medRxiv papers (if method is "keyword"). Case-insensitive.
+    keywords:
+      - protein
+      - sequencing
+      - brain
+    # Optional: Override global_fetch_window_days for this source.
+    fetch_window: 3
+
+# --- Output Settings ---
 output:
-  # Path to the file where relevant paper details will be appended.
-  file: "relevant_papers.txt"
-  # Format for the output file. Options: "markdown" or "plain"
-  format: "markdown"
-  # Only applies if relevance_checking_method is "llm". Include LLM confidence score?
+  file: "relevant_papers.md" # Path where results are appended.
+  format: "markdown" # "markdown" or "plain".
+  # Include LLM details in the file output (if method is "llm"):
   include_confidence: true
-  # Only applies if relevance_checking_method is "llm". Include LLM explanation?
-  include_explanation: true
+  include_explanation: false
 
-# --- Scheduling Configuration ---
+# --- Scheduling Settings ---
 schedule:
-  # Time of day (HH:MM format, 24-hour clock) to run the check automatically.
-  run_time: "09:00"
-  # Optional: Timezone for the run_time. Defaults to system local time if omitted.
-  # Examples: "UTC", "America/New_York". Requires 'pytz' or Python 3.9+ ('zoneinfo').
+  run_time: "09:00" # Daily run time (HH:MM, 24-hour clock).
+  # Optional: Timezone for run_time (e.g., "UTC", "America/New_York").
+  # Requires pytz (installed) or Python >= 3.9 (zoneinfo).
+  # Defaults to system local time if omitted or invalid.
   # timezone: "UTC"
 
-# --- Notifications Configuration ---
+# --- Notification Settings ---
 notifications:
-  # Set to true to enable sending summary emails, false to disable.
-  send_email_summary: true
-
-  # List of email addresses that will receive the summary email.
+  send_email_summary: true # Enable/disable email notifications.
   email_recipients:
-    - "user1@example.com"
-    # - "user2@example.com"
+    - "recipient1@example.com"
+    # - "recipient2@example.com"
 
-  # Sender Email Credentials - IMPORTANT: See security note in guide below!
+  # Sender Email Account Details
   email_sender:
     address: "your_sender_email@gmail.com"
-    # SECURITY: Use App Password (Gmail 2FA) or environment variable (EMAIL_SENDER_PASSWORD)
-    # instead of storing your plain password here!
-    password: "YOUR_APP_PASSWORD_OR_ENV_VAR_VALUE"
+    # SECURITY WARNING: Use an App Password (Gmail 2FA) or environment variable
+    # (EMAIL_SENDER_PASSWORD) instead of your actual password!
+    password: "YOUR_APP_PASSWORD_OR_ENV_VAR"
 
-  # SMTP Server Details (Lookup for your provider)
+  # SMTP Server Details (e.g., for Gmail)
   smtp:
     server: "smtp.gmail.com"
-    port: 587 # Usually 587 for TLS
+    port: 587 # Typically 587 (TLS) or 465 (SSL)
 ```
 
-**Configuration Details Guide:**
+**Configuration Guide:**
 
-*   **`max_total_results`**: Limits how many papers arXiv returns for the fetch query (based on categories and date). (Default: 500 in code if not set)
-*   **`relevance_checking_method`**: Selects the core logic: `"keyword"` or `"llm"`. (Required)
-*   **`paper_source.arxiv.categories`**: List of arXiv categories to fetch from. (Required)
-*   **`paper_source.arxiv.keywords`**: List of case-insensitive keywords used *only* when `relevance_checking_method` is `"keyword"`.
-*   **`relevance_checker.llm.provider`**: Specifies the LLM service (currently only `"groq"`). Used only if method is `"llm"`.
-*   **`relevance_checker.llm.groq.api_key`**: Your Groq API key. **Required** if method is `"llm"` and provider is `"groq"`. **SECURITY:** Prefer loading this from an environment variable (`GROQ_API_KEY`) over hardcoding it. The script will check the environment variable first.
-*   **`relevance_checker.llm.groq.model`**: (Optional) Specify a Groq model. Defaults to `llama-3.1-8b-instant` in the code.
-*   **`relevance_checker.llm.groq.prompt`**: The question/instruction given to the LLM.
-*   **`relevance_checker.llm.groq.confidence_threshold`**: Minimum LLM confidence (0.0-1.0) to mark a paper as relevant.
-*   **`output.file`**: Path where results are appended. (Default: `relevant_papers.txt`)
-*   **`output.format`**: Style of the output file (`"markdown"` or `"plain"`).
-*   **`output.include_confidence` / `include_explanation`**: Whether to include LLM metadata in the *output file* (only applies when method is `"llm"`).
-*   **`schedule.run_time`**: Time for the daily automatic run (HH:MM). (Default: `"08:00"` in code if not set)
-*   **`schedule.timezone`**: (Optional) Timezone for `run_time`. Requires `pytz` (included) or Python >= 3.9 (`zoneinfo`).
-*   **`notifications.send_email_summary`**: Enable/disable email (`true`/`false`).
-*   **`notifications.email_recipients`**: List of recipient email addresses.
-*   **`notifications.email_sender.address` / `password`**: Credentials for the *sending* email account. **SECURITY WARNING:** **Do not store plain passwords directly in the config file.** Use an App Password (especially for Gmail with 2FA) or preferably load the password from an environment variable (`EMAIL_SENDER_PASSWORD`). The script checks the environment variable first.
-*   **`notifications.smtp.server` / `port`**: Your email provider's outgoing mail server details (e.g., `smtp.gmail.com`, port `587`).
+*   **`active_sources`**: List which keys under `paper_source` to use.
+*   **`global_fetch_window_days`**: Default lookback period if a source doesn't define `fetch_window`.
+*   **`max_total_results`**: (arXiv only) Limits results from the API call.
+*   **`relevance_checking_method`**: `keyword`, `llm`, `none`.
+*   **`relevance_checker.llm...`**: Settings for LLM checks (provider, API key, model, prompt, threshold, batching). **SECURITY:** Use `GROQ_API_KEY` environment variable for the API key.
+*   **`paper_source.<source_name>.*`**: Configure `categories`, `keywords`, and optional `fetch_window` for each source.
+    *   `biorxiv.server`: Set to `"biorxiv"` or `"medrxiv"`.
+*   **`output.*`**: File path, format (`markdown` or `plain`), and LLM detail inclusion for the output file.
+*   **`schedule.*`**: Daily run time (`HH:MM`) and optional `timezone`.
+*   **`notifications.*`**: Email settings. **SECURITY:** Use an environment variable (`EMAIL_SENDER_PASSWORD`) or App Password for the sender password.
 
 ## ▶️ Usage
 
-Run the main script from the project's root directory:
+Ensure your `config.yaml` is created and configured correctly, and any necessary environment variables (e.g., `GROQ_API_KEY`, `EMAIL_SENDER_PASSWORD`) are set.
+
+Run the main script from the project root directory (ensure your virtual environment is active):
 
 ```bash
 python main.py
 ```
 
-The script will perform an initial check upon starting and then run daily at the time specified in `config.yaml`. It logs progress to the console. Press `Ctrl+C` to stop gracefully.
+The script performs an initial check on startup and then runs daily according to the schedule. Logs are printed to the console. Press `Ctrl+C` to stop.
 
 ## ✅ Testing
 
-1.  Ensure development dependencies are installed: `pip install -r requirements.txt` (includes `pytest`, `pytest-mock`).
-2.  Run `pytest` from the project root:
+1.  Install development dependencies: `pip install -r requirements.txt`
+2.  Run tests using `pytest`:
     ```bash
     # Run all tests
     pytest
 
-    # Run tests verbosely
+    # Run verbosely
     pytest -v
 
-    # Run tests BUT SKIP those marked 'llm' (which require API keys/external calls)
+    # Skip tests marked 'llm' (avoids real API calls)
     pytest -m "not llm"
     ```
-    *Note: The `llm` marker is defined in `pytest.ini`.*
+    *(The `llm` marker is defined in `pytest.ini`)*
 
 ## 🚀 Extensibility
 
-The application uses Abstract Base Classes (ABCs) for modularity, making it easier to add new functionality.
+Adding new components typically involves:
 
-### Adding a New Paper Source
+1.  **Creating a Class:** Implement the corresponding ABC (e.g., `BasePaperSource`, `BaseLLMChecker`, `BaseOutput`) in the appropriate `src/` subdirectory.
+2.  **Updating Factory Functions:** Modify the relevant `create_*` function in `main.py` to recognize and instantiate your new class based on configuration.
+3.  **Updating Configuration:** Add necessary configuration options to `config.yaml` for your new component.
+4.  **Writing Tests:** Add unit/integration tests for the new component.
 
-*(Limitation: Currently, `main.py` is hardcoded to instantiate and use `ArxivSource`. Future improvements could make the source configurable via `config.yaml`.)*
+*(Note: Currently, the core `check_papers` logic is geared towards the implemented sources/methods. Significant changes might require adjustments there.)*
 
-1.  **Create Source Class:** In `src/paper_sources/`, create `your_source.py` inheriting from `BasePaperSource` (`src.paper_sources.base_source.BasePaperSource`).
-2.  **Implement Methods:** Implement the abstract methods: `configure(config)` and `fetch_papers()`.
-3.  **Update `main.py` (Manual Step):** Modify `main.py` to instantiate your new source class instead of `ArxivSource`.
+## 📄 License
 
-### Adding a New Relevance Checker (e.g., different LLM provider)
-
-1.  **Create Checker Class:** In `src/llm/`, create `your_checker.py` inheriting from `BaseRelevanceChecker` (`src.llm.base_checker.BaseRelevanceChecker`).
-2.  **Implement Methods:** Implement the abstract methods: `configure(config)`, `check_relevance(paper)`, and potentially `check_relevance_batch(papers)`.
-3.  **Update `create_relevance_checker` in `main.py`:** Modify the factory function in `main.py` to recognize and instantiate your new checker based on the `relevance_checker.llm.provider` config value.
-4.  **Update Config:** Add necessary configuration options for your checker in `config.yaml` under `relevance_checker.llm`.
-
-### Adding a New Output Format/Method
-
-1.  **Create Output Class:** In `src/output/`, create `your_output.py` inheriting from `BaseOutput` (`src.output.base_output.BaseOutput`).
-2.  **Implement Methods:** Implement `configure(config)` and `output(papers)`.
-3.  **Update `create_output_handlers` in `main.py`:** Modify the factory function to instantiate your new output handler based on config (e.g., based on `output.format` or a new `output.type` key).
-
-### Adding a New Notification Method
-
-1.  **Create Notification Class:** In `src/notifications/`, create `your_notification.py` inheriting from `BaseNotification` (`src.notifications.base_notification.BaseNotification`).
-2.  **Implement Methods:** Implement `configure(config)` and `notify(papers, run_stats)`.
-3.  **Update `create_notification_handler` in `main.py`:** Modify the factory function to instantiate your new handler based on config.
-
-## 🤝 Contributing (Placeholder)
-
-Contributions are welcome! Please follow standard fork/pull request procedures. (Consider adding guidelines for code style, testing, etc.)
-
-## 📜 License
-
-This project is licensed under the [GNU GPLv3](LICENSE).
+*(Consider adding a license file, e.g., MIT License)*

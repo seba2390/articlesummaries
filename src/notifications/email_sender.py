@@ -31,13 +31,13 @@ class EmailSender:
             config: The main application configuration dictionary.
         """
         # Extract relevant configuration sections with defaults
-        self.config = config  # Store full config if needed later
+        self.config = config
         notification_config = config.get("notifications", {})
         self.sender_config = notification_config.get("email_sender", {})
         self.smtp_config = notification_config.get("smtp", {})
         self.recipients = notification_config.get("email_recipients", [])
         self.send_email = notification_config.get("send_email_summary", False)
-        self.output_config = config.get("output", {})  # Used for formatting flags
+        self.output_config = config.get("output", {})  # Keep for _format_paper_html
 
         # Validate essential configuration if email sending is enabled
         if self.send_email:
@@ -85,8 +85,8 @@ class EmailSender:
 
         # Start building the HTML block for the paper
         paper_html = f'''
-        <div class="paper">
-          <h3><a href="{url_escaped}" target="_blank">{title_escaped}</a></h3>
+        <div class="paper {html.escape(paper.source.lower())}">
+          <h3><a href="{url_escaped}" target="_blank">{title_escaped} ({html.escape(paper.source)})</a></h3>
           <p><strong>Authors:</strong> {authors_str}</p>
           <p><strong>Categories:</strong> {categories_str}</p>
           <p><strong>Published/Updated:</strong> {published_str}</p>
@@ -124,36 +124,60 @@ class EmailSender:
         """
         return paper_html
 
-    def _format_html_summary(
-        self, num_fetched: int, relevant_papers: List[Paper], run_duration_secs: float, checking_method: str
-    ) -> str:
-        """Creates the full HTML body for the summary email.
+    def _format_html_summary(self, relevant_papers: List[Paper], run_stats: Dict[str, Any]) -> str:
+        """Creates the full HTML body for the summary email using run statistics.
 
-        Includes a header with run statistics and then lists the details
-        of each relevant paper formatted by `_format_paper_html`.
+        Includes a header with run statistics (potentially multiple sources)
+        and then lists the details of each relevant paper.
 
         Args:
-            num_fetched: Total number of papers fetched initially.
             relevant_papers: List of papers deemed relevant.
-            run_duration_secs: Duration of the monitoring job run in seconds.
-            checking_method: The relevance checking method used ('keyword' or 'llm').
+            run_stats: Dictionary containing statistics about the run,
+                       including details per source fetched.
 
         Returns:
             The complete HTML string for the email body.
         """
-        num_relevant = len(relevant_papers)
-        run_completed_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Extract info from run_stats
+        num_relevant = run_stats.get("total_relevant", len(relevant_papers))
+        num_fetched = run_stats.get("total_fetched", 0)
+        run_duration_secs = run_stats.get("run_duration_secs", 0.0)
+        checking_method = run_stats.get("checking_method", "unknown").lower()
+        sources_summary = run_stats.get("sources_summary", {})
+        # Get run completed time from run_stats if available, else use current time
+        run_completed_time_dt = run_stats.get("run_completed_time", datetime.now())
+        run_completed_time = run_completed_time_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Basic CSS styling for the email
-        # Note: Email client CSS support varies. Inline styles might be more robust
-        # but this external block is cleaner to read/maintain.
+        # Define time format for source-specific times
+        time_format = "%Y-%m-%d %H:%M %Z"  # Include time and timezone
+
+        # --- Generate Source Summary Section ---
+        source_details_html = "<ul>\n"
+        if sources_summary:
+            for name, details in sources_summary.items():
+                fetched_count = details.get("fetched", "Error")
+                window = details.get("fetch_window_days", "N/A")
+                start_time = details.get("start_time")
+                end_time = details.get("end_time")
+                # Format times if available
+                start_str = start_time.strftime(time_format) if start_time else "N/A"
+                end_str = end_time.strftime(time_format) if end_time else "N/A"
+                source_details_html += (
+                    f"  <li><strong>{html.escape(name)}:</strong> Fetched {fetched_count} "
+                    f"(window: {window} days, queried: {html.escape(start_str)} to {html.escape(end_str)})</li>\n"
+                )
+        else:
+            source_details_html += "<li>No source-specific details available.</li>"
+        source_details_html += "</ul>"
+
+        # --- CSS (minor additions for source indication) ---
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>arXiv Paper Monitor Summary</title>
+        <title>Paper Monitor Summary</title> <!-- Generic Title -->
         <style>
           body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; margin: 20px; line-height: 1.5; color: #333; background-color: #f4f7f6; }}
           .container {{ max-width: 800px; margin: 0 auto; background-color: #ffffff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }}
@@ -164,8 +188,12 @@ class EmailSender:
           h3 a:hover {{ text-decoration: underline; }}
           p {{ margin: 5px 0 10px 0; }}
           .summary {{ background-color: #ecf0f1; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #bdc3c7; }}
-          .summary p {{ margin: 8px 0; }}
+          .summary p, .summary ul {{ margin: 8px 0; }}
+          .summary ul {{ padding-left: 20px; }}
           .paper {{ border: 1px solid #ddd; border-radius: 5px; padding: 15px; margin-bottom: 15px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }}
+          .paper.arxiv {{ border-left: 4px solid #b31b1b; }}
+          .paper.biorxiv {{ border-left: 4px solid #0072c3; }}
+          .paper.medrxiv {{ border-left: 4px solid #f39c12; }}
           .keywords {{ background-color: #eafaf1; color: #16a085; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; display: inline-block; margin-right: 4px; }}
           details summary {{ cursor: pointer; font-weight: bold; color: #34495e; margin-bottom: 5px; outline: none; }}
           details summary:hover {{ color: #2c3e50; }}
@@ -175,20 +203,25 @@ class EmailSender:
         </head>
         <body>
         <div class="container">
-          <h1>arXiv Paper Monitor: Run Summary</h1>
+          <h1>Paper Monitor: Run Summary</h1>
           <div class="summary">
             <p><strong>Run completed:</strong> {run_completed_time}</p>
+            <p><strong>Sources checked:</strong></p>
+            {source_details_html} <!-- Insert source details list with times -->
             <p><strong>Relevance checking method used:</strong> <span style="font-weight: bold; color: #8e44ad;">{html.escape(checking_method.upper())}</span></p>
-            <p><strong>Total papers fetched (initial):</strong> {num_fetched}</p>
+            <p><strong>Total papers fetched (all sources):</strong> {num_fetched}</p>
             <p><strong>Relevant papers found:</strong> {num_relevant}</p>
             <p><strong>Total run duration:</strong> {run_duration_secs:.2f} seconds</p>
           </div>
         """
 
-        # Add section for relevant papers if any were found
+        # Add section for relevant papers
         if relevant_papers:
             html_content += "<h2>Relevant Papers Found</h2>\n"
+            # Sort papers by source then maybe date? Optional.
+            # relevant_papers.sort(key=lambda p: (p.source, p.published_date or datetime.min))
             for paper in relevant_papers:
+                # Pass checking_method needed by _format_paper_html
                 html_content += self._format_paper_html(paper, checking_method)
         else:
             html_content += "<p>No relevant papers were found in this run.</p>\n"
@@ -200,88 +233,53 @@ class EmailSender:
         """
         return html_content
 
-    def send_summary_email(
-        self,
-        num_fetched: int,
-        relevant_papers: List[Paper],
-        run_duration_secs: float,
-        checking_method: str,
-        # output_file: Optional[str] = None # Parameter removed as it wasn't used
-    ):
+    def send_summary_email(self, relevant_papers: List[Paper], run_stats: Dict[str, Any]):
         """Connects to the SMTP server, sends the HTML summary email, and disconnects.
 
-        This method orchestrates the email sending process:
-        1. Checks if email sending is enabled and configured.
-        2. Constructs the email subject.
-        3. Creates a MIMEMultipart message with the HTML body.
-        4. Connects to the SMTP server using TLS.
-        5. Authenticates with the sender credentials.
-        6. Sends the email to the configured recipients.
-        7. Closes the SMTP connection.
-        Handles common SMTP errors gracefully.
+        Uses the `run_stats` dictionary to generate the email content.
 
         Args:
-            num_fetched: Total number of papers fetched initially.
             relevant_papers: List of papers deemed relevant.
-            run_duration_secs: Duration of the monitoring job run in seconds.
-            checking_method: The relevance checking method used ('keyword' or 'llm').
+            run_stats: Dictionary containing statistics about the run.
         """
-        # Early exit if email is disabled or misconfigured (checked in __init__)
         if not self.send_email:
             logger.info("Email notifications are disabled or improperly configured. Skipping email sending.")
             return
 
-        # Extract required configuration details
         sender_email = self.sender_config["address"]
         sender_password = self.sender_config["password"]
         smtp_server = self.smtp_config["server"]
         smtp_port = self.smtp_config["port"]
 
-        # Construct the email subject line
-        subject = (
-            f"arXiv Monitor Summary - {datetime.now().strftime('%Y-%m-%d')} - {len(relevant_papers)} Relevant Paper(s)"
-        )
+        # Generic subject line
+        num_relevant = run_stats.get("total_relevant", len(relevant_papers))
+        subject = f"Paper Monitor Summary - {datetime.now().strftime('%Y-%m-%d')} - {num_relevant} Relevant Paper(s)"
 
-        # Create the email message object (MIMEMultipart for HTML content)
         msg = MIMEMultipart("alternative")
         msg["From"] = sender_email
-        msg["To"] = ", ".join(self.recipients)  # Comma-separated list for header
+        msg["To"] = ", ".join(self.recipients)
         msg["Subject"] = subject
-        # Set content type explicitly to help some clients
         msg.add_header("Content-Type", "text/html; charset=utf-8")
 
-        # Format the HTML body
+        # Format HTML body using run_stats
         html_body = self._format_html_summary(
-            num_fetched=num_fetched,
             relevant_papers=relevant_papers,
-            run_duration_secs=run_duration_secs,
-            checking_method=checking_method,
+            run_stats=run_stats,  # Pass the dictionary
         )
-        # Attach the HTML part, ensuring UTF-8 encoding
         msg.attach(MIMEText(html_body, "html", _charset="utf-8"))
 
-        # Initialize SMTP server connection variable
         server: Optional[smtplib.SMTP] = None
         try:
-            # Connect to the SMTP server
             logger.info(f"Connecting to SMTP server {smtp_server}:{smtp_port}...")
-            # Consider adding a timeout to the SMTP connection
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)  # 30-second timeout
-            server.ehlo()  # Identify client to server
-            # Upgrade connection to secure TLS
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+            server.ehlo()
             server.starttls()
-            server.ehlo()  # Re-identify after TLS
-
-            # Login to the SMTP server
+            server.ehlo()
             logger.info("Logging into SMTP server...")
             server.login(sender_email, sender_password)
-
-            # Send the email
             logger.info(f"Sending email summary to: {', '.join(self.recipients)}")
-            # sendmail expects recipients as a list, not a comma-separated string
             server.sendmail(sender_email, self.recipients, msg.as_string())
             logger.info("Summary email sent successfully.")
-
         except smtplib.SMTPAuthenticationError:
             logger.error(
                 "SMTP Authentication Error: Check sender email/password in config `notifications.email_sender`. "
@@ -297,14 +295,11 @@ class EmailSender:
         except TimeoutError:
             logger.error(f"SMTP connection to {smtp_server}:{smtp_port} timed out. Email not sent.")
         except Exception as e:
-            # Catch any other exceptions during the SMTP process
             logger.error(f"An unexpected error occurred while sending email: {e}", exc_info=True)
         finally:
-            # Ensure the SMTP connection is closed gracefully
             if server:
                 try:
                     server.quit()
                     logger.info("SMTP connection closed.")
                 except Exception as e_quit:
-                    # Log error during quit but don't crash
                     logger.error(f"Error closing SMTP connection: {e_quit}")

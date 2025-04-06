@@ -47,8 +47,8 @@ def test_configure_no_keywords(keyword_filter_instance: KeywordFilter, caplog: p
         keyword_filter_instance.configure(config_empty)
     assert keyword_filter_instance.keywords == []
     # Assert: Check the specific warning message content
-    assert "KeywordFilter configured with no valid keywords" in caplog.text
-    assert "The filter will pass all papers." in caplog.text
+    assert "KeywordFilter configured, but no valid 'keywords' list found within the provided config's 'paper_source' section." in caplog.text
+    assert "The filter will pass all papers in this context." in caplog.text
     caplog.clear() # Clear logs for the next check
 
     # Arrange: Config with empty keywords list
@@ -58,8 +58,8 @@ def test_configure_no_keywords(keyword_filter_instance: KeywordFilter, caplog: p
         keyword_filter_instance.configure(config_empty_list)
     assert keyword_filter_instance.keywords == []
     # Assert: Check the specific warning message content again
-    assert "KeywordFilter configured with no valid keywords" in caplog.text
-    assert "The filter will pass all papers." in caplog.text
+    assert "KeywordFilter configured, but no valid 'keywords' list found within the provided config's 'paper_source' section." in caplog.text
+    assert "The filter will pass all papers in this context." in caplog.text
 
 def test_filter_with_keywords(keyword_filter_instance: KeywordFilter, sample_papers: List[Paper]):
     """Tests the core filtering logic: papers matching configured keywords (case-insensitive)

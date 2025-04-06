@@ -1,10 +1,12 @@
 arxiv
-schedule
-PyYAML
+dotenv
 requests
-groq
-tqdm
+python-dateutil
 pytz
+PyYAML
+schedule
+tqdm
+groq
 
 # Testing
 pytest
