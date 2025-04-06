@@ -1,4 +1,4 @@
-![arXiv Paper Monitor Logo](assets/logo.png)
+![arXiv Paper Monitor Logo](assets/logo_1.png)
 
 # 📄 arXiv Paper Monitor
 
