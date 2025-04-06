@@ -1,3 +1,5 @@
+![arXiv Paper Monitor Logo](assets/logo.png)
+
 # 📄 arXiv Paper Monitor
 
 ## 📝 Description
@@ -39,7 +41,6 @@ articlesummaries/
 ├── src/                    # Source code directory
 │   ├── __init__.py
 │   ├── config_loader.py    # Handles loading config.yaml
-│   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
 │   │   ├── base_filter.py  # ABC for filters
 │   │   └── keyword_filter.py # Keyword filtering implementation
