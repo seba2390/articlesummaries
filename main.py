@@ -31,7 +31,7 @@ from src.scheduler import Scheduler
 # --- Logging Configuration ---
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)-8s] %(name)-25s %(message)s",  # Include logger name
+    format="%(asctime)s [%(levelname)s] %(name)s %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
     datefmt="%Y-%m-%d %H:%M:%S",
 )
