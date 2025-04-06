@@ -5,6 +5,7 @@
 active_sources:
   - "arxiv"
   - "biorxiv"
+  - "medrxiv"
 
 # Maximum total number of papers to fetch across all categories in a single run.
 # This acts as a safeguard if the number of papers published today is very large.
@@ -72,6 +73,26 @@ paper_source:
               ]
     fetch_window: 4 # Days to look back for papers (Uses global if not set here)
 
+  # Settings for medRxiv (using the bioRxiv API endpoint)
+  medrxiv:
+    # medRxiv subject categories (case-sensitive, use underscores for spaces if needed by API)
+    # Examples: "Epidemiology", "Infectious Diseases", "Cardiology"
+    # Find categories on the medRxiv website. Leave empty [] to search all.
+    categories: [
+                  "Epidemiology",
+                  "Infectious Diseases (except HIV)",
+                  "Health Informatics"
+                ]
+    # Keywords specific to filtering papers fetched ONLY from medRxiv
+    # Used only when relevance_checking_method is "keyword".
+    keywords: [
+               "public health",
+               "clinical trial",
+               "pandemic",
+               "vaccine"
+              ]
+    fetch_window: 4 # Optional: Override global fetch window
+
 
 
 # Relevance checker specific settings (used depending on relevance_checking_method)
@@ -110,7 +131,7 @@ notifications:
   # A list of email addresses that will receive the summary email.
   # Add each recipient on a new line starting with '- '.
   email_recipients:
-    - "another_email@example.org"
+    - ""
 
   # --- Sender Email Credentials ---
   # IMPORTANT: Storing credentials directly in this file is INSECURE,

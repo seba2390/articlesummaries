@@ -26,6 +26,7 @@ from src.paper import Paper
 from src.paper_sources.arxiv_source import ArxivSource
 from src.paper_sources.base_source import BasePaperSource
 from src.paper_sources.biorxiv_source import BiorxivSource
+from src.paper_sources.medrxiv_source import MedrxivSource
 from src.scheduler import Scheduler
 
 # --- Logging Configuration ---
@@ -68,6 +69,8 @@ def create_paper_source(source_name: str, config: Dict[str, Any]) -> Optional[Ba
             source_instance = ArxivSource()
         elif source_name_lower == "biorxiv":
             source_instance = BiorxivSource()
+        elif source_name_lower == "medrxiv":
+            source_instance = MedrxivSource()
         # Add other sources here with elif source_name_lower == "other_source":
         else:
             logger.error(f"Unknown paper source specified: '{source_name}'")

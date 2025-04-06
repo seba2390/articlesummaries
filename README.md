@@ -10,7 +10,7 @@ The application runs on a daily schedule defined in the configuration and featur
 
 ## ✨ Features
 
-*   **Multi-Source Monitoring:** Fetches papers from arXiv and bioRxiv/medRxiv based on settings in `config.yaml`.
+*   **Multi-Source Monitoring:** Fetches papers from arXiv, bioRxiv, and medRxiv based on settings in `config.yaml`.
 *   **Source-Specific Configuration:** Define categories, keywords (for filtering), and fetch windows (days to look back) independently for each source.
 *   **Flexible Relevance Checking:**
     *   `"keyword"`: Filters papers using source-specific keyword lists against titles/abstracts.
@@ -45,7 +45,8 @@ articlesummaries/
 │   │   ├── __init__.py
 │   │   ├── base_source.py  # ABC for paper sources
 │   │   ├── arxiv_source.py # arXiv implementation
-│   │   └── biorxiv_source.py # bioRxiv/medRxiv implementation
+│   │   └── biorxiv_source.py # bioRxiv implementation (used by medRxiv source)
+│   │   └── medrxiv_source.py # medRxiv implementation
 │   ├── filtering/          # Modules for filtering papers
 │   │   ├── __init__.py
 │   │   ├── base_filter.py  # ABC for filters
@@ -75,6 +76,7 @@ articlesummaries/
 │   ├── paper_sources/
 │   │   ├── test_arxiv_source.py
 │   │   └── test_biorxiv_source.py
+│   │   └── test_medrxiv_source.py
 │   ├── test_config_loader.py
 │   ├── test_main.py
 │   └── test_scheduler.py
@@ -122,7 +124,7 @@ This file controls the application's behavior. See the comments within the examp
 
 # List of sources to activate for fetching. Corresponds to keys under 'paper_source'.
 # Example: ["arxiv", "biorxiv"]
-active_sources: ["arxiv", "biorxiv"]
+active_sources: ["arxiv", "biorxiv", "medrxiv"]
 
 # Default number of days to look back for papers if not specified per source.
 # Each source uses this or its own 'fetch_window' setting.
@@ -189,6 +191,21 @@ paper_source:
     # Optional: Override global_fetch_window_days for this source.
     fetch_window: 3
 
+  # Settings for medRxiv (uses the bioRxiv API endpoint)
+  medrxiv:
+    # Categories: https://www.medrxiv.org/collection (Case-sensitive, use spaces)
+    categories:
+      - Cardiology
+      - Epidemiology
+      - "Infectious Diseases (except HIV)"
+    # Keywords for filtering medRxiv papers (if method is "keyword"). Case-insensitive.
+    keywords:
+      - "clinical trial"
+      - pandemic
+      - vaccine
+    # Optional: Override global_fetch_window_days for this source.
+    fetch_window: 3
+
 # --- Output Settings ---
 output:
   file: "relevant_papers.md" # Path where results are appended.
@@ -233,7 +250,8 @@ notifications:
 *   **`relevance_checking_method`**: `keyword`, `llm`, `none`.
 *   **`relevance_checker.llm...`**: Settings for LLM checks (provider, API key, model, prompt, threshold, batching). **SECURITY:** Use `GROQ_API_KEY` environment variable for the API key.
 *   **`paper_source.<source_name>.*`**: Configure `categories`, `keywords`, and optional `fetch_window` for each source.
-    *   `biorxiv.server`: Set to `"biorxiv"` or `"medrxiv"`.
+    *   The `biorxiv` source has a `server` key that must be `"biorxiv"`.
+    *   The `medrxiv` source implicitly queries the medRxiv server.
 *   **`output.*`**: File path, format (`markdown` or `plain`), and LLM detail inclusion for the output file.
 *   **`schedule.*`**: Daily run time (`HH:MM`) and optional `timezone`.
 *   **`notifications.*`**: Email settings. **SECURITY:** Use an environment variable (`EMAIL_SENDER_PASSWORD`) or App Password for the sender password.
