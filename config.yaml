@@ -7,7 +7,7 @@ max_total_results: 100
 # --- Relevance Checking Method ---
 # Determines the overall method used for checking paper relevance.
 # Options: "keyword" or "llm"
-relevance_checking_method: "keyword"
+relevance_checking_method: "llm"
 
 # Paper source configuration
 paper_source:
@@ -46,7 +46,7 @@ relevance_checker:
     provider: "groq"  # Options: groq, custom
     groq: # Settings specific to the "groq" provider
       # SECURITY: Consider using environment variable (GROQ_API_KEY) instead!
-      api_key: "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"  # Your Groq API key
+      api_key: ""  # Your Groq API key
       model: "llama-3.1-8b-instant"  # Groq model to use
       prompt: "Is this paper relevant to my research on tensor networks for quantum circuit simulations, or quantum circuit simulation in general?"
       batch_size: 5  # Number of papers to process in each batch (0 for no batching)
@@ -76,8 +76,8 @@ notifications:
   # A list of email addresses that will receive the summary email.
   # Add each recipient on a new line starting with '- '.
   email_recipients:
-    - "madsen3008@gmail.com"
-    - "lucas.1998@live.dk"
+    - "some_email@gmail.com"
+    # - "another_email@example.org"
 
   # --- Sender Email Credentials ---
   # IMPORTANT: Storing credentials directly in this file is INSECURE,
@@ -90,10 +90,10 @@ notifications:
   #      See: https://myaccount.google.com/apppasswords
   email_sender:
     # The email address the summary email will be sent FROM.
-    address: "madsen3008@gmail.com"
+    address: ""
 
     # The email password for the sender address OR the generated App Password (e.g. if using Gmail with 2FA enabled).
-    password: "nlsj yket flvw hfyo"
+    password: ""
 
   # --- SMTP Server Details ---
   # These settings tell the script how to connect to your email provider's sending server.
