@@ -1,7 +1,5 @@
 ![arXiv Paper Monitor Logo](assets/logo_1.png)
 
-# 📄 arXiv Paper Monitor
-
 ## 📝 Description
 
 This project provides a configurable Python application to monitor publications on arXiv. It automatically fetches papers updated on the previous calendar day across specified categories, checks their relevance (using keyword matching or LLM-based assessment via Groq), outputs the findings to a file, and can send an email summary containing the details of relevant papers.
