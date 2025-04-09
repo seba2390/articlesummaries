@@ -151,7 +151,7 @@ def test_check_papers_basic_flow(MockArxivSource, mock_create_checker, MockEmail
 
     # Configure config for test specifics
     mock_config["relevance_checking_method"] = "keyword"
-    mock_config["notifications"]["send_email_summary"] = True
+    mock_config["send_email_summary"] = True
     output_filename = "dummy_output.txt"
     mock_config["output"] = {"file": output_filename}
 
@@ -216,7 +216,7 @@ def test_check_papers_no_papers_fetched(MockArxivSource, mock_create_checker, Mo
     mock_writer_instance = MockFileWriter.return_value
 
     mock_source_instance.fetch_papers.return_value = [] # Simulate no papers fetched
-    mock_config["notifications"]["send_email_summary"] = True
+    mock_config["send_email_summary"] = True
 
     # Act
     check_papers(mock_config)
@@ -280,7 +280,7 @@ def test_check_papers_no_relevant_papers(MockArxivSource, mock_create_checker, M
     mock_source_instance.fetch_papers.return_value = [mock_paper1]
     mock_filter_instance.filter.return_value = [] # Filter returns empty
     mock_config["relevance_checking_method"] = "keyword"
-    mock_config["notifications"]["send_email_summary"] = True
+    mock_config["send_email_summary"] = True
 
     # Act
     check_papers(mock_config)
@@ -335,7 +335,7 @@ def test_check_papers_llm_flow(MockArxivSource, mock_create_checker, MockEmailSe
 
     # Arrange: Config
     mock_config['relevance_checking_method'] = 'llm'
-    mock_config["notifications"]["send_email_summary"] = True
+    mock_config["send_email_summary"] = True
 
     # Arrange: Mock LLM checker
     mock_llm_checker_instance = MagicMock(spec=GroqChecker)
@@ -414,7 +414,7 @@ def test_check_papers_llm_creation_fails(MockArxivSource, mock_create_checker, M
 
     # Arrange: Config
     mock_config['relevance_checking_method'] = 'llm'
-    mock_config["notifications"]["send_email_summary"] = True
+    mock_config["send_email_summary"] = True
     mock_create_checker.return_value = None # Simulate failure
 
     # Arrange: Mock source and writer
@@ -471,7 +471,7 @@ def test_check_papers_llm_batch_error(MockArxivSource, mock_create_checker, Mock
 
     # Arrange: Config
     mock_config['relevance_checking_method'] = 'llm'
-    mock_config["notifications"]["send_email_summary"] = True
+    mock_config["send_email_summary"] = True
     mock_llm_checker_instance = MagicMock(spec=GroqChecker)
     mock_llm_checker_instance.check_relevance_batch.side_effect = Exception("Batch API failed")
     mock_create_checker.return_value = mock_llm_checker_instance
