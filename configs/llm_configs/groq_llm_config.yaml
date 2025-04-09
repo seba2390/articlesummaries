@@ -1,0 +1,9 @@
+# Groq LLM Provider Configuration
+groq:
+  # SECURITY: Consider using environment variable (GROQ_API_KEY) instead!
+  api_key: ""  # Your Groq API key
+  model: "llama-3.1-8b-instant"  # Groq model to use
+  prompt: "Is this paper relevant to my research on tensor networks for quantum circuit simulations, or quantum circuit simulation in general?"
+  batch_size: 5  # Number of papers to process in each batch (0 for no batching)
+  confidence_threshold: 0.7  # Minimum confidence score to consider a paper relevant
+  batch_delay_seconds: 15 # Seconds to wait between consecutive batch API calls (adjust based on rate limits)

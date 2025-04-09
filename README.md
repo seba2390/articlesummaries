@@ -29,7 +29,20 @@ The application runs on a daily schedule defined in the configuration and featur
 ```plaintext
 articlesummaries/
 ├── .gitignore
-├── config.yaml             # --- Configuration File --- (*Create this*)
+├── main_config.yaml        # Main configuration file
+├── main_config.example.yaml # Example main config
+├── configs/                # Directory for modular configs
+│   ├── email_config.yaml   # Email settings
+│   ├── email_config.example.yaml # Example email settings
+│   ├── paper_sources_configs/ # Source-specific settings
+│   │   ├── arxiv_config.yaml
+│   │   ├── arxiv_config.example.yaml
+│   │   ├── biorxiv_config.yaml
+│   │   ├── biorxiv_config.example.yaml
+│   │   └── ... (other sources)
+│   └── llm_configs/          # LLM provider settings (optional)
+│       ├── groq_llm_config.yaml
+│       └── groq_llm_config.example.yaml
 ├── main.py                 # Main execution script
 ├── pytest.ini              # Pytest configuration (markers)
 ├── README.md               # This file
@@ -38,7 +51,7 @@ articlesummaries/
 │   └── logo_1.png
 ├── src/                    # --- Source Code ---
 │   ├── __init__.py
-│   ├── config_loader.py    # Loads config.yaml
+│   ├── config_loader.py    # Loads and merges all config files
 │   ├── paper.py            # Defines the Paper data class
 │   ├── scheduler.py        # Handles job scheduling
 │   ├── paper_sources/      # Modules for fetching papers
@@ -109,192 +122,116 @@ articlesummaries/
     ```bash
     pip install -r requirements.txt
     ```
-4.  **Create and Configure `config.yaml`:** Copy the example structure below into a `config.yaml` file in the project root and customize it.
+4.  **Create Configuration Files:**
+    *   Copy `main_config.example.yaml` to `main_config.yaml`.
+    *   Create a `configs/` directory in the project root.
+    *   Inside `configs/`, create a `paper_sources_configs/` subdirectory.
+    *   Inside `configs/`, create an `llm_configs/` subdirectory (if using LLM checks).
+    *   Copy `configs/email_config.example.yaml` to `configs/email_config.yaml`.
+    *   Copy source examples (e.g., `configs/paper_sources_configs/arxiv_config.example.yaml`) to `configs/paper_sources_configs/` for each source listed in `main_config.yaml`, renaming them (e.g., `arxiv_config.yaml`).
+    *   Copy LLM examples (e.g., `configs/llm_configs/groq_llm_config.example.yaml`) to `configs/llm_configs/` if needed.
+5.  **Configure:** Edit the copied YAML files (`main_config.yaml`, `configs/email_config.yaml`, `configs/paper_sources_configs/*.yaml`, `configs/llm_configs/*.yaml`) according to your needs. See details below.
+6.  **(Optional - LLM)** If using `relevance_checking_method: "llm"` with Groq, set the `GROQ_API_KEY` environment variable:
+    ```bash
+    export GROQ_API_KEY='YOUR_GROQ_API_KEY'
+    ```
+    (Or place it in a `.env` file, which is gitignored by default).
 
-## ⚙️ Configuration (`config.yaml`)
+## ⚙️ Configuration Files
 
-This file controls the application's behavior. See the comments within the example and the guide below for details.
+The application uses a modular configuration system managed by `src/config_loader.py`:
 
-```yaml
-# ==========================================
-# Multi-Source Paper Monitor Configuration
-# ==========================================
+1.  **`main_config.yaml`**: Located in the project root. This file defines the core behavior:
+    *   `active_sources`: A list of source names (e.g., `"arxiv"`, `"biorxiv"`). These names correspond to the filenames (without `.yaml`) in the `configs/paper_sources_configs/` directory.
+    *   `relevance_checking_method`: Sets the global method (`"keyword"`, `"llm"`, or `"none"`).
+    *   `send_email_summary`: A top-level boolean (`true` or `false`) to enable/disable email summaries globally. *Note: Email details are configured in `email_config.yaml`.*
+    *   `max_total_results`: A safeguard limit for the total number of papers fetched per run.
+    *   `relevance_checker.llm.provider`: Specifies the LLM provider (e.g., `"groq"`) if `relevance_checking_method` is `"llm"`. *Note: Provider-specific settings (like API key, model, prompt) are loaded from `configs/llm_configs/<provider>_llm_config.yaml`.*
+    *   `output`: Configures the output file (`file`), format (`format`), and whether to include LLM details (`include_confidence`, `include_explanation`).
+    *   `schedule`: Defines the daily run time (`run_time`) and timezone (`timezone`).
 
-# --- Global Settings ---
+2.  **`configs/paper_sources_configs/<source_name>_config.yaml`**: One file per active source, located in `configs/paper_sources_configs/`. Each file contains settings specific to that source:
+    *   A top-level key matching the source name (e.g., `arxiv:`).
+    *   `categories`: List of categories/subjects to search within.
+    *   `keywords`: List of keywords used for filtering if `relevance_checking_method` is `"keyword"`.
+    *   `fetch_window`: Number of past days to fetch papers from for this source.
+    *   (Source-specific settings like `server` for bioRxiv/medRxiv).
 
-# List of sources to activate for fetching. Corresponds to keys under 'paper_source'.
-# Example: ["arxiv", "biorxiv"]
-active_sources: ["arxiv", "biorxiv", "medrxiv"]
+3.  **`configs/email_config.yaml`**: Located in `configs/`. This file exclusively contains email notification settings under the `notifications` key:
+    *   `email_recipients`: List of recipient addresses.
+    *   `email_sender`: Sender's `address` and `password` (or App Password). *Security Note: Use environment variables or a secrets manager for the password instead of hardcoding.* See comments in the example file.
+    *   `smtp`: SMTP `server` and `port` details.
 
-# Default number of days to look back for papers if not specified per source.
-# Each source uses this or its own 'fetch_window' setting.
-global_fetch_window_days: 4
+4.  **`configs/llm_configs/<provider>_llm_config.yaml`**: (Optional) Located in `configs/llm_configs/`. Contains provider-specific LLM settings (e.g., API key, model, prompt, batching) if `relevance_checking_method` is `"llm"`.
+    *   These files are structured according to the needs of the specific LLM provider implementation (e.g., `groq:` key for Groq settings).
 
-# (Used by arXiv) Maximum total number of papers to fetch from arXiv API per run.
-# Acts as a safeguard against excessively large result sets.
-max_total_results: 500
+**Loading Logic:** The `config_loader.py` script first loads `main_config.yaml`. Then, for each source listed in `active_sources`, it loads the corresponding `<source_name>_config.yaml`. It also loads `email_config.yaml` and merges its `notifications` section. Finally, if LLM checking is enabled, it loads the relevant `<provider>_llm_config.yaml` and merges its settings. This creates a single, combined configuration dictionary used by the application.
 
-# --- Relevance Checking ---
+## ▶️ Running the Application
 
-# Method to determine relevance: "keyword", "llm", or "none".
-relevance_checking_method: "keyword"
-
-# Settings used only when relevance_checking_method is "llm".
-relevance_checker:
-  llm:
-    provider: "groq" # Currently only "groq" is implemented.
-    groq:
-      # REQUIRED if provider is "groq". Get from https://console.groq.com/keys
-      # SECURITY: Use GROQ_API_KEY environment variable instead of hardcoding here.
-      api_key: "YOUR_GROQ_API_KEY"
-      # Optional: Specify Groq model. Defaults to 'llama-3.1-8b-instant'.
-      # model: "mixtral-8x7b-32768"
-      prompt: "Is this paper relevant to machine learning agents and reinforcement learning?"
-      confidence_threshold: 0.7 # Minimum confidence score (0.0-1.0) to consider relevant.
-      batch_size: 10 # Number of abstracts to process per API call.
-      batch_delay_seconds: 2 # Seconds to wait between batch API calls.
-
-# --- Paper Source Specific Settings ---
-paper_source:
-
-  # Settings for arXiv
-  arxiv:
-    # ArXiv categories: https://arxiv.org/category_taxonomy
-    categories:
-      - cs.AI
-      - cs.CV
-      - cs.LG
-      - stat.ML
-    # Keywords for filtering arXiv papers (if method is "keyword"). Case-insensitive.
-    keywords:
-      - agent
-      - "foundation model"
-      - diffusion
-      - transformer
-    # Optional: Override global_fetch_window_days for this source.
-    fetch_window: 7
-
-  # Settings for bioRxiv / medRxiv
-  biorxiv:
-    server: "biorxiv" # Can be "biorxiv" or "medrxiv"
-    # Categories: https://www.biorxiv.org/collection (Case-sensitive, use spaces)
-    categories:
-      - Biochemistry
-      - Bioinformatics
-      - Neuroscience
-      - Plant Biology
-    # Keywords for filtering bioRxiv/medRxiv papers (if method is "keyword"). Case-insensitive.
-    keywords:
-      - protein
-      - sequencing
-      - brain
-    # Optional: Override global_fetch_window_days for this source.
-    fetch_window: 3
-
-  # Settings for medRxiv (uses the bioRxiv API endpoint)
-  medrxiv:
-    # Categories: https://www.medrxiv.org/collection (Case-sensitive, use spaces)
-    categories:
-      - Cardiology
-      - Epidemiology
-      - "Infectious Diseases (except HIV)"
-    # Keywords for filtering medRxiv papers (if method is "keyword"). Case-insensitive.
-    keywords:
-      - "clinical trial"
-      - pandemic
-      - vaccine
-    # Optional: Override global_fetch_window_days for this source.
-    fetch_window: 3
-
-# --- Output Settings ---
-output:
-  file: "relevant_papers.md" # Path where results are appended.
-  format: "markdown" # "markdown" or "plain".
-  # Include LLM details in the file output (if method is "llm"):
-  include_confidence: true
-  include_explanation: false
-
-# --- Scheduling Settings ---
-schedule:
-  run_time: "09:00" # Daily run time (HH:MM, 24-hour clock).
-  # Optional: Timezone for run_time (e.g., "UTC", "America/New_York").
-  # Requires pytz (installed) or Python >= 3.9 (zoneinfo).
-  # Defaults to system local time if omitted or invalid.
-  # timezone: "UTC"
-
-# --- Notification Settings ---
-notifications:
-  send_email_summary: true # Enable/disable email notifications.
-  email_recipients:
-    - "recipient1@example.com"
-    # - "recipient2@example.com"
-
-  # Sender Email Account Details
-  email_sender:
-    address: "your_sender_email@gmail.com"
-    # SECURITY WARNING: Use an App Password (Gmail 2FA) or environment variable
-    # (EMAIL_SENDER_PASSWORD) instead of your actual password!
-    password: "YOUR_APP_PASSWORD_OR_ENV_VAR"
-
-  # SMTP Server Details (e.g., for Gmail)
-  smtp:
-    server: "smtp.gmail.com"
-    port: 587 # Typically 587 (TLS) or 465 (SSL)
-```
-
-**Configuration Guide:**
-
-*   **`active_sources`**: List which keys under `paper_source` to use.
-*   **`global_fetch_window_days`**: Default lookback period if a source doesn't define `fetch_window`.
-*   **`max_total_results`**: (arXiv only) Limits results from the API call.
-*   **`relevance_checking_method`**: `keyword`, `llm`, `none`.
-*   **`relevance_checker.llm...`**: Settings for LLM checks (provider, API key, model, prompt, threshold, batching). **SECURITY:** Use `GROQ_API_KEY` environment variable for the API key.
-*   **`paper_source.<source_name>.*`**: Configure `categories`, `keywords`, and optional `fetch_window` for each source.
-    *   The `biorxiv` source has a `server` key that must be `"biorxiv"`.
-    *   The `medrxiv` source implicitly queries the medRxiv server.
-*   **`output.*`**: File path, format (`markdown` or `plain`), and LLM detail inclusion for the output file.
-*   **`schedule.*`**: Daily run time (`HH:MM`) and optional `timezone`.
-*   **`notifications.*`**: Email settings. **SECURITY:** Use an environment variable (`EMAIL_SENDER_PASSWORD`) or App Password for the sender password.
-
-## ▶️ Usage
-
-Ensure your `config.yaml` is created and configured correctly, and any necessary environment variables (e.g., `GROQ_API_KEY`, `EMAIL_SENDER_PASSWORD`) are set.
-
-Run the main script from the project root directory (ensure your virtual environment is active):
+Once configured, run the main script from the project root:
 
 ```bash
 python main.py
 ```
 
-The script performs an initial check on startup and then runs daily according to the schedule. Logs are printed to the console. Press `Ctrl+C` to stop.
+The script will:
+1.  Load all configuration files.
+2.  Log the setup.
+3.  Wait until the scheduled time (`schedule.run_time`).
+4.  Execute the `check_papers` job:
+    *   Fetch papers from active sources.
+    *   Filter/check relevance based on the configured method.
+    *   Append relevant papers to the output file.
+    *   Send an email summary (if enabled).
+5.  Repeat daily.
+
+To stop the scheduler, press `Ctrl+C`.
 
 ## ✅ Testing
 
-1.  Install development dependencies: `pip install -r requirements.txt`
-2.  Run tests using `pytest`:
+Tests are located in the `tests/` directory and use `pytest`.
+
+*   Run all tests:
     ```bash
-    # Run all tests
     pytest
-
-    # Run verbosely
-    pytest -v
-
-    # Skip tests marked 'llm' (avoids real API calls)
+    ```
+*   Run tests *excluding* those marked `llm` (which might make external API calls):
+    ```bash
     pytest -m "not llm"
     ```
-    *(The `llm` marker is defined in `pytest.ini`)*
+*   Run only tests marked `llm`:
+    ```bash
+    pytest -m llm
+    ```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit pull requests or open issues.
+
+## 📜 License
+
+This project is licensed under the [LICENSE_NAME] License - see the [LICENSE](LICENSE) file for details.
 
 ## 🚀 Extensibility
 
-Adding new components typically involves:
+Adding new components (like paper sources or LLM relevance checkers) involves the following steps:
 
-1.  **Creating a Class:** Implement the corresponding ABC (e.g., `BasePaperSource`, `BaseLLMChecker`, `BaseOutput`) in the appropriate `src/` subdirectory.
-2.  **Updating Factory Functions:** Modify the relevant `create_*` function in `main.py` to recognize and instantiate your new class based on configuration.
-3.  **Updating Configuration:** Add necessary configuration options to `config.yaml` for your new component.
-4.  **Writing Tests:** Add unit/integration tests for the new component.
+1.  **Create the Implementation Class:**
+    *   For a new paper source, create a Python class in `src/paper_sources/` that inherits from `src.paper_sources.base_source.BasePaperSource` and implements its abstract methods (`configure`, `fetch_papers`).
+    *   For a new LLM checker, create a class in `src/llm/` inheriting from `src.llm.base_checker.BaseLLMChecker` and implementing its methods.
+    *   Follow a similar pattern for new output handlers or notification systems, inheriting from the corresponding base class in `src/output/` or `src/notifications/`.
 
-*(Note: Currently, the core `check_papers` logic is geared towards the implemented sources/methods. Significant changes might require adjustments there.)*
+2.  **Update the Factory Function:**
+    *   Modify the relevant `create_*` function in `main.py` (e.g., `create_paper_source`, `create_relevance_checker`) to recognize a new configuration key or provider name and instantiate your newly created class.
 
-## 📄 License
+3.  **Add Configuration File(s):**
+    *   **Paper Source:** Create a new YAML configuration file for your source in the `configs/paper_sources_configs/` directory (e.g., `configs/paper_sources_configs/pubmed_config.yaml`). The filename (without `.yaml`) should match the source name you use in `main_config.yaml`'s `active_sources` list and the factory function logic. Define the source-specific settings within this file under a top-level key matching the source name (e.g., `pubmed:`).
+    *   **LLM Checker:** If your checker requires specific configuration (API keys, models, prompts), create a configuration file in `configs/llm_configs/` (e.g., `configs/llm_configs/openai_llm_config.yaml`). Structure the settings as needed by your implementation.
+    *   Update `main_config.yaml` if necessary (e.g., add the new source name to `active_sources`, set the `relevance_checker.llm.provider` to your new checker's name).
 
-*(Consider adding a license file, e.g., MIT License)*
+4.  **Write Tests:**
+    *   Add unit tests for your new class in the corresponding subdirectory within `tests/`.
+    *   Consider adding integration tests or updating existing ones in `tests/test_main.py` if your component significantly changes the main workflow.
+
+*(Note: Depending on the complexity of the new component, adjustments might also be needed in the core `check_papers` logic within `main.py`.)*

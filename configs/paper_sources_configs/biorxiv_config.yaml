@@ -1,0 +1,23 @@
+# Settings for bioRxiv
+biorxiv:
+  # Which server to query: "biorxiv" or "medrxiv"
+  server: "biorxiv"
+  # bioRxiv/medRxiv subject categories (case-sensitive, use underscores for spaces)
+  # Examples: "cell_biology", "genomics", "neuroscience"
+  # Find categories on the bioRxiv/medRxiv websites. Leave empty [] to search all.
+  categories: [
+                "Biochemistry",
+                "Bioinformatics",
+                "Neuroscience",
+                "Plant Biology"
+              ]
+  # Keywords specific to filtering papers fetched ONLY from bioRxiv/medRxiv
+  # Used only when relevance_checking_method is "keyword".
+  keywords: [
+             "systems biology",
+             "computational biology",
+             "protein",
+             "sequencing",
+             "brain"
+            ]
+  fetch_window: 4 # Days to look back for papers (Uses global if not set here)

@@ -59,7 +59,7 @@ MOCK_NOW_UTC = datetime(2025, 4, 6, 13, 15, 47, tzinfo=timezone.utc)
 def test_arxiv_source_configure(arxiv_source_instance: ArxivSource, valid_config: dict):
     """Tests that ArxivSource configures its attributes correctly from the config dict."""
     # Act
-    arxiv_source_instance.configure(valid_config)
+    arxiv_source_instance.configure(valid_config, 'arxiv')
     # Assert
     assert arxiv_source_instance.categories == ['cs.AI', 'cs.LG']
     assert arxiv_source_instance.max_total_results == 10
@@ -72,7 +72,7 @@ def test_arxiv_source_configure_with_fetch_window(arxiv_source_instance: ArxivSo
         'paper_source': {'arxiv': {'categories': ['cs.AI'], 'fetch_window': 3}},
         'max_total_results': 5
     }
-    arxiv_source_instance.configure(config)
+    arxiv_source_instance.configure(config, 'arxiv')
     assert arxiv_source_instance.fetch_window_days == 3
     assert arxiv_source_instance.max_total_results == 5
 
@@ -83,26 +83,26 @@ def test_arxiv_source_configure_invalid_fetch_window(arxiv_source_instance: Arxi
     config_zero = { 'paper_source': {'arxiv': {'fetch_window': 0}}}
 
     with caplog.at_level(logging.WARNING):
-        arxiv_source_instance.configure(config_neg)
+        arxiv_source_instance.configure(config_neg, 'arxiv')
         assert arxiv_source_instance.fetch_window_days == ArxivSource.DEFAULT_FETCH_WINDOW_DAYS
         assert "is not a positive integer" in caplog.text
 
     caplog.clear()
     with caplog.at_level(logging.WARNING):
-        arxiv_source_instance.configure(config_str)
+        arxiv_source_instance.configure(config_str, 'arxiv')
         assert arxiv_source_instance.fetch_window_days == ArxivSource.DEFAULT_FETCH_WINDOW_DAYS
         assert "is not a valid integer" in caplog.text
 
     caplog.clear()
     with caplog.at_level(logging.WARNING):
-        arxiv_source_instance.configure(config_zero)
+        arxiv_source_instance.configure(config_zero, 'arxiv')
         assert arxiv_source_instance.fetch_window_days == ArxivSource.DEFAULT_FETCH_WINDOW_DAYS
         assert "is not a positive integer" in caplog.text
 
 def test_arxiv_source_configure_defaults(arxiv_source_instance: ArxivSource):
     """Tests that ArxivSource uses default values when keys are missing from config."""
     # Act
-    arxiv_source_instance.configure({}) # Pass empty config
+    arxiv_source_instance.configure({}, 'arxiv')
     # Assert
     assert arxiv_source_instance.categories == [] # Default empty list
     # Check against the class default attribute
@@ -133,7 +133,7 @@ def test_fetch_papers_success(
     mock_datetime.timezone = timezone
 
     # Arrange: Configure the instance (fetch_window defaults to 1 day)
-    arxiv_source_instance.configure(valid_config)
+    arxiv_source_instance.configure(valid_config, 'arxiv')
     assert arxiv_source_instance.fetch_window_days == 1 # Verify default
 
     # Arrange: Calculate expected date range based on MOCK_NOW_UTC and fetch_window=1
@@ -219,7 +219,7 @@ def test_fetch_papers_api_error(
     Verifies that an empty list is returned and the error is logged (implicitly).
     """
     # Arrange
-    arxiv_source_instance.configure(valid_config)
+    arxiv_source_instance.configure(valid_config, 'arxiv')
     # Simulate error during API interaction
     mock_arxiv_search.side_effect = Exception("ArXiv API is down")
 
@@ -256,7 +256,7 @@ def test_fetch_papers_max_results_warning(
         'paper_source': {'arxiv': {'categories': ['cs.AI'], 'fetch_window': 2}}, # Use window=2 days
         'max_total_results': 2 # Low limit for testing
     }
-    arxiv_source_instance.configure(config)
+    arxiv_source_instance.configure(config, 'arxiv')
     assert arxiv_source_instance.fetch_window_days == 2
 
     # Arrange: Calculate expected date range based on mocked now and fetch_window=2
@@ -305,7 +305,7 @@ def test_fetch_papers_no_categories(arxiv_source_instance: ArxivSource):
         'paper_source': {'arxiv': {'categories': []}},
         'max_total_results': 10
     }
-    arxiv_source_instance.configure(config)
+    arxiv_source_instance.configure(config, 'arxiv')
 
     # Act: Call method under test with dummy times (as it should exit early)
     dummy_start = MOCK_NOW_UTC - timedelta(days=1)

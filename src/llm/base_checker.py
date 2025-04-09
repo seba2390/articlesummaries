@@ -36,6 +36,12 @@ class BaseLLMChecker(ABC):
         # Example: def __init__(self, api_key: str, model: str = "default-model"): ...
         pass
 
+    @property
+    @abstractmethod
+    def provider_name(self) -> str:
+        """Returns the name of the LLM provider (e.g., 'groq', 'openai')."""
+        raise NotImplementedError
+
     @abstractmethod
     def check_relevance(self, abstract: str, prompt: str) -> LLMResponse:
         """Checks the relevance of a single paper abstract using the LLM.

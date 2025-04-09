@@ -1,0 +1,44 @@
+# Main configuration for arXiv Paper Monitor
+
+# --- Active Sources ---
+# List of paper sources to fetch from. Corresponds to keys under 'paper_source'.
+active_sources:
+  - "arxiv"
+  - "biorxiv"
+  - "medrxiv"
+
+# --- Relevance Checking Method ---
+# Determines the overall method used for checking paper relevance.
+# Options: "keyword" or "llm"
+relevance_checking_method: "keyword"
+
+# --- Enable/Disable Email ---
+# Set this to 'true' to enable sending summary emails, 'false' to disable.
+# If false, the settings below are ignored.
+send_email_summary: true
+
+# Maximum total number of papers to fetch across all categories in a single run.
+# This acts as a safeguard if the number of papers published today is very large.
+max_total_results: 10 # Note: This might need adjustment depending on how sources handle limits.
+
+# Relevance checker specific settings (used depending on relevance_checking_method)
+relevance_checker:
+  llm:
+    provider: "groq"  # Options: groq, custom
+    # Groq specific settings are now loaded from configs/llm_configs/groq_llm_config.yaml
+
+# Output configuration
+output:
+  file: "relevant_papers.txt"  # File to save relevant papers
+  format: "markdown"  # Output format (markdown, plain)
+  include_confidence: true  # Whether to include confidence scores in output
+  include_explanation: true  # Whether to include LLM explanations in output
+
+# Notifications configuration (email specific settings are in email_config.yaml)
+notifications:
+  {} # Use an empty dictionary instead of pass
+
+# Schedule configuration
+schedule:
+  run_time: "09:00"  # Daily run time (24-hour format)
+  timezone: "UTC"  # Timezone for run time

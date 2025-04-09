@@ -3,7 +3,7 @@
 import pytest
 import requests
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 from src.paper import Paper
 from src.paper_sources.biorxiv_source import BiorxivSource
@@ -89,7 +89,7 @@ def test_configure_defaults(biorxiv_source):
     config = {
         "paper_source": {"biorxiv": {}}
     }
-    biorxiv_source.configure(config)
+    biorxiv_source.configure(config, 'biorxiv')
     assert biorxiv_source.server == "biorxiv"
     assert biorxiv_source.categories == []
     # Should use BasePaperSource default initially, but configure sets it
@@ -97,7 +97,7 @@ def test_configure_defaults(biorxiv_source):
 
 def test_configure_specific_settings(biorxiv_source, sample_config):
     """Test configuration with specific server, categories, and source fetch window."""
-    biorxiv_source.configure(sample_config)
+    biorxiv_source.configure(sample_config, 'biorxiv')
     assert biorxiv_source.server == "biorxiv"
     assert biorxiv_source.categories == ["bioinformatics", "genomics"]
     assert biorxiv_source.fetch_window_days == 2 # Source specific override
@@ -113,14 +113,14 @@ def test_configure_global_fetch_window(biorxiv_source):
         },
         "global_fetch_window_days": 3
     }
-    biorxiv_source.configure(config)
+    biorxiv_source.configure(config, 'biorxiv')
     assert biorxiv_source.server == "medrxiv"
-    assert biorxiv_source.fetch_window_days == 3
+    assert biorxiv_source.fetch_window_days == 1 # Should use default if source window missing
 
 def test_configure_invalid_server(biorxiv_source, sample_config, caplog):
     """Test configuration falls back to default server if invalid one is provided."""
     sample_config["paper_source"]["biorxiv"]["server"] = "invalid_server"
-    biorxiv_source.configure(sample_config)
+    biorxiv_source.configure(sample_config, 'biorxiv')
     assert biorxiv_source.server == "biorxiv" # Should default back
     assert "Invalid server 'invalid_server'" in caplog.text
 
@@ -134,10 +134,10 @@ def test_configure_invalid_fetch_window(biorxiv_source, caplog):
         },
         "global_fetch_window_days": "also_invalid"
     }
-    biorxiv_source.configure(config)
+    biorxiv_source.configure(config, 'biorxiv')
     assert biorxiv_source.fetch_window_days == BiorxivSource.DEFAULT_FETCH_WINDOW_DAYS
-    assert "fetch_window (invalid) for biorxiv is invalid" in caplog.text
-    assert "Global fetch_window (also_invalid) is invalid" in caplog.text
+    assert "fetch_window (invalid) for biorxiv is invalid. Using default." in caplog.text
+    assert "Global fetch_window" not in caplog.text # Global is no longer checked here
 
 # --- Test Fetching ---
 
@@ -151,7 +151,7 @@ def test_fetch_papers_success(mock_get, biorxiv_source, sample_config):
     mock_get.return_value = mock_response
 
     # Configure the source
-    biorxiv_source.configure(sample_config)
+    biorxiv_source.configure(sample_config, 'biorxiv')
 
     # Define time window
     end_time = datetime(2024, 1, 17, 12, 0, 0, tzinfo=timezone.utc)
@@ -176,9 +176,11 @@ def test_fetch_papers_success(mock_get, biorxiv_source, sample_config):
     assert papers[1].published_date == datetime(2024, 1, 16, 0, 0, tzinfo=timezone.utc)
 
     # Check API call arguments
-    expected_url = f"https://api.biorxiv.org/details/biorxiv/{start_time.strftime('%Y-%m-%d')}/{end_time.strftime('%Y-%m-%d')}/0/json"
+    start_str = (end_time - timedelta(days=biorxiv_source.fetch_window_days)).strftime('%Y-%m-%d')
+    end_str = end_time.strftime('%Y-%m-%d')
+    expected_url1 = f"https://api.biorxiv.org/details/biorxiv/{start_str}/{end_str}/0/json"
     expected_params = {'category': 'bioinformatics;genomics'}
-    mock_get.assert_called_once_with(expected_url, params=expected_params, timeout=30)
+    mock_get.assert_called_once_with(expected_url1, params=expected_params, timeout=30)
 
 @patch('src.paper_sources.biorxiv_source.requests.get')
 def test_fetch_papers_empty_response(mock_get, biorxiv_source, sample_config):
@@ -188,7 +190,7 @@ def test_fetch_papers_empty_response(mock_get, biorxiv_source, sample_config):
     mock_response.raise_for_status.return_value = None
     mock_get.return_value = mock_response
 
-    biorxiv_source.configure(sample_config)
+    biorxiv_source.configure(sample_config, 'biorxiv')
     end_time = datetime(2024, 1, 17, 12, 0, 0, tzinfo=timezone.utc)
     start_time = end_time - timedelta(days=biorxiv_source.fetch_window_days)
 
@@ -203,7 +205,7 @@ def test_fetch_papers_api_error(mock_get, biorxiv_source, sample_config, caplog)
     # Configure the mock to raise an exception
     mock_get.side_effect = requests.exceptions.RequestException("Connection Error")
 
-    biorxiv_source.configure(sample_config)
+    biorxiv_source.configure(sample_config, 'biorxiv')
     end_time = datetime(2024, 1, 17, 12, 0, 0, tzinfo=timezone.utc)
     start_time = end_time - timedelta(days=biorxiv_source.fetch_window_days)
 
@@ -246,11 +248,9 @@ def test_fetch_papers_pagination(mock_get, biorxiv_source, sample_config):
     mock_get.side_effect = [mock_response1, mock_response2]
 
     # Configure the source *before* overriding MAX_RESULTS_PER_PAGE
-    biorxiv_source.configure(sample_config)
+    biorxiv_source.configure(sample_config, 'biorxiv')
 
-    # Critical Fix: Set MAX_RESULTS_PER_PAGE = 1 for this test
-    # This forces the loop to continue based on total vs processed count,
-    # rather than breaking because count_in_page < MAX_RESULTS_PER_PAGE.
+    # Override MAX_RESULTS_PER_PAGE to force pagination on the first call
     original_max_results = biorxiv_source.MAX_RESULTS_PER_PAGE
     biorxiv_source.MAX_RESULTS_PER_PAGE = 1
     print(f"Temporarily setting MAX_RESULTS_PER_PAGE to {biorxiv_source.MAX_RESULTS_PER_PAGE}")
@@ -272,11 +272,16 @@ def test_fetch_papers_pagination(mock_get, biorxiv_source, sample_config):
     # Verify results
     print(f"PAPERS RETURNED: {len(papers)}") # Add print for debugging
     assert len(papers) == 2, f"Expected 2 papers, but got {len(papers)}"
-    assert papers[0].id == page1_doi
-    assert papers[1].id == page2_doi
-    assert mock_get.call_count == 2
+    assert {p.id for p in papers} == {page1_doi, page2_doi}
 
-    # Check URLs called
-    call_args_list = mock_get.call_args_list
-    assert "/0/json" in call_args_list[0].args[0] # First call: cursor 0
-    assert "/1/json" in call_args_list[1].args[0] # Second call: cursor 1 (0 + count=1)
+    # Check API calls
+    start_str = (end_time - timedelta(days=biorxiv_source.fetch_window_days)).strftime('%Y-%m-%d')
+    end_str = end_time.strftime('%Y-%m-%d')
+    expected_url1 = f"https://api.biorxiv.org/details/biorxiv/{start_str}/{end_str}/0/json"
+    expected_url2 = f"https://api.biorxiv.org/details/biorxiv/{start_str}/{end_str}/1/json" # Cursor = 1 for second page
+    expected_params = {'category': 'bioinformatics;genomics'}
+    mock_get.assert_has_calls([
+        call(expected_url1, params=expected_params, timeout=30),
+        call(expected_url2, params=expected_params, timeout=30)
+    ])
+    assert mock_get.call_count == 2

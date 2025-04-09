@@ -1,0 +1,42 @@
+# --- Notifications Configuration ---
+notifications:
+  # --- Recipient Emails ---
+  # A list of email addresses that will receive the summary email.
+  # Add each recipient on a new line starting with '- '.
+  email_recipients:
+    - ""
+
+  # --- Sender Email Credentials ---
+  # IMPORTANT: Storing credentials directly in this file is INSECURE,
+  # especially if you commit it to version control (like Git).
+  # It's strongly recommended to use one of these alternatives:
+  #   1. Environment Variables: Load the address/password from the system environment.
+  #   2. Secrets Manager: Use a dedicated service (AWS Secrets Manager, HashiCorp Vault, etc.).
+  #   3. App Passwords (Gmail/Google Workspace): If using Gmail with 2-Factor Authentication (2FA) enabled,
+  #      you MUST generate an "App Password" specifically for this application.
+  #      See: https://myaccount.google.com/apppasswords
+  email_sender:
+    # The email address the summary email will be sent FROM.
+    address: ""
+
+    # The email password for the sender address OR the generated App Password (e.g. if using Gmail with 2FA enabled).
+    password: ""
+
+  # --- SMTP Server Details ---
+  # These settings tell the script how to connect to your email provider's sending server.
+  # You often need to look these up for your specific email provider (e.g., search "Gmail SMTP settings").
+  smtp:
+    # The hostname of the SMTP server.
+    # Common examples:
+    #   - Gmail: "smtp.gmail.com"
+    #   - Outlook/Office365: "smtp.office365.com"
+    #   - Yahoo: "smtp.mail.yahoo.com"
+    server: "smtp.gmail.com"
+
+    # The port number for the SMTP server connection.
+    # Common examples:
+    #   - 587 (Recommended for TLS/STARTTLS encryption)
+    #   - 465 (Used for older SSL encryption)
+    #   - 25 (Standard SMTP, often blocked, usually unencrypted - avoid if possible)
+    # Port 587 is the most common for modern secure connections.
+    port: 587

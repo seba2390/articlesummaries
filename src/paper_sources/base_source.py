@@ -30,7 +30,7 @@ class BasePaperSource(ABC):
         pass
 
     @abstractmethod
-    def configure(self, config: Dict[str, Any]):
+    def configure(self, config: Dict[str, Any], source_name: str):
         """Configures the paper source instance using settings from the application config.
 
         Subclasses must implement this method to read their specific configuration
@@ -39,8 +39,9 @@ class BasePaperSource(ABC):
 
         Args:
             config: The main application configuration dictionary. Implementations
-                    should typically access their specific section, e.g.,
-                    `config.get('paper_source', {}).get('arxiv', {})`.
+                    should typically access their specific section using the source_name,
+                    e.g., `config.get('paper_source', {}).get(source_name, {})`.
+            source_name: The identifier of the source (e.g., 'arxiv', 'biorxiv').
         """
         raise NotImplementedError  # Ensure subclasses implement this
 

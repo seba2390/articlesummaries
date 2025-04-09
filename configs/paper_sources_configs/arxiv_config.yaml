@@ -1,0 +1,29 @@
+# Settings for arXiv
+arxiv:
+  categories: [  # ArXiv categories to search - find categories here: https://arxiv.org/category_taxonomy
+                "math-ph",          # Mathematical Physics
+                "physics.atm-clus", # Atomic and Molecular Clusters
+                "physics.comp-ph",  # Computational Physics
+                "quant-ph",         # Quantum Physics
+                "physics.data-an",  # Data Analysis, Statistics and Probability
+                "math.IT",          # Information Theory
+                "math.NA",          # Numerical Analysis
+                "math.OC",          # Optimization and Control
+                "cs.AI",            # Artificial Intelligence
+                "cs.CE",            # Computational Engineering, Finance, and Science
+                "cs.IT",            # Information Theory
+                "cs.LG"             # Machine Learning
+              ]
+  # Keywords specific to filtering papers fetched ONLY from arXiv
+  # Used only when relevance_checking_method is "keyword".
+  keywords: [
+             "tensor network",
+             "quantum circuit simulation",
+             "expectation value estimation",
+             "contraction path",
+             "Quantum Approximate Optimization Algorithm",
+             "QAOA",
+             "variational quantum eigensolver",
+             "VQE",
+             ]
+  fetch_window: 4 # Days to look back for papers (Uses global if not set here)

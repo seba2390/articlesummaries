@@ -25,7 +25,7 @@ def mock_config():
         "active_sources": ["arxiv"],
         "max_total_results": 100, # General limit (used by ArxivSource)
         "relevance_checking_method": "keyword", # Default check method
-        "global_fetch_window_days": 1, # Add a default global fetch window
+        # "global_fetch_window_days": 1, # Removed global fetch window
 
         # --- Paper Source Configuration (Example: arXiv) ---
         "paper_source": {
@@ -39,16 +39,16 @@ def mock_config():
         # --- Relevance Checker Configuration ---
         "relevance_checker": {
             # Keyword config is implicitly read from paper_source.arxiv.keywords
-            "llm": { # LLM settings (even if method is keyword, might be needed for create_relevance_checker mock)
+            "llm": { # LLM settings
                 "provider": "groq",
-                "relevance_criteria": "General AI/ML relevance",
+                # Provider specific settings (e.g., groq) are loaded from separate file
+                # but we can keep some mocks here for tests if needed
                 "groq": {
                     "api_key": "mock-groq-key",
-                    "model": "llama-3.1-8b-instant", # Optional model override
-                    "prompt": "Is this paper relevant to {topic}?", # Example prompt
-                    "confidence_threshold": 0.7 # Example threshold
+                    "model": "mock-llama-test",
+                    "prompt": "Is this mock paper relevant?",
+                    "confidence_threshold": 0.75
                 }
-                # Add other providers here (e.g., "openai": {...})
             }
         },
 
@@ -161,7 +161,7 @@ def test_check_papers_basic_flow(MockArxivSource, mock_create_checker, MockEmail
     # Assert: Check interactions
     MockArxivSource.assert_called_once() # Check ArxivSource() was called
     # Assertions are now on the mock_source_instance returned by the patched call
-    mock_source_instance.configure.assert_called_once_with(mock_config)
+    mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv')
     mock_source_instance.fetch_papers.assert_called_once()
 
     MockKeywordFilter.assert_called_once() # Check KeywordFilter() was called
@@ -223,7 +223,7 @@ def test_check_papers_no_papers_fetched(MockArxivSource, mock_create_checker, Mo
 
     # Assert: Check component interactions
     MockArxivSource.assert_called_once()
-    mock_source_instance.configure.assert_called_once_with(mock_config)
+    mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv')
     mock_source_instance.fetch_papers.assert_called_once() # Should be called
 
     # Filter and Writer class should not be called now (check_papers exits before filter/writer instantiation)
@@ -287,7 +287,8 @@ def test_check_papers_no_relevant_papers(MockArxivSource, mock_create_checker, M
 
     # Assert: Check component interactions
     MockArxivSource.assert_called_once()
-    mock_source_instance.configure.assert_called_once_with(mock_config)
+    # Check that configure was called with the full config and the source name
+    mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv') # Added source name
     mock_source_instance.fetch_papers.assert_called_once()
 
     MockKeywordFilter.assert_called_once()
@@ -375,6 +376,8 @@ def test_check_papers_llm_flow(MockArxivSource, mock_create_checker, MockEmailSe
     assert output_call_args[0][0].id == 'L1'
     # Check relevance info was added to the paper passed to writer
     assert output_call_args[0][0].relevance["confidence"] == 0.9
+    # Make sure provider_name attribute exists on the mock
+    mock_llm_checker_instance.provider_name = 'groq'
     MockEmailSender.assert_called_once_with(mock_config)
     mock_email_instance = MockEmailSender.return_value
     mock_email_instance.send_summary_email.assert_called_once()
@@ -382,12 +385,12 @@ def test_check_papers_llm_flow(MockArxivSource, mock_create_checker, MockEmailSe
     # Assert based on the new call signature (relevant_papers, run_stats)
     assert 'relevant_papers' in call_kwargs
     assert 'run_stats' in call_kwargs
-    assert call_kwargs['relevant_papers'] == [mock_writer_instance.output.call_args.args[0][0]]
+    assert call_kwargs['relevant_papers'] == [mock_paper1]
     run_stats_arg = call_kwargs['run_stats']
     assert run_stats_arg['total_fetched'] == 2
     assert run_stats_arg['total_relevant'] == 1
     assert run_stats_arg['checking_method'] == 'llm' # Check method
-    assert run_stats_arg['source_name'] == 'arXiv'
+    assert 'arxiv' in run_stats_arg['sources_summary'] # Check source exists in summary dict
     assert isinstance(run_stats_arg['run_duration_secs'], float)
 
     # Assert: Check logs
@@ -445,7 +448,7 @@ def test_check_papers_llm_creation_fails(MockArxivSource, mock_create_checker, M
     assert run_stats_arg['total_fetched'] == 1
     assert run_stats_arg['total_relevant'] == 1
     assert run_stats_arg['checking_method'] == 'none'
-    assert run_stats_arg['source_name'] == 'arXiv'
+    assert 'arxiv' in run_stats_arg['sources_summary'] # Check source exists in summary dict
     assert isinstance(run_stats_arg['run_duration_secs'], float)
 
     # Assert: Check logs
@@ -506,7 +509,7 @@ def test_check_papers_llm_batch_error(MockArxivSource, mock_create_checker, Mock
     assert run_stats_arg['total_fetched'] == 1
     assert run_stats_arg['total_relevant'] == 0
     assert run_stats_arg['checking_method'] == 'llm'
-    assert run_stats_arg['source_name'] == 'arXiv'
+    assert 'arxiv' in run_stats_arg['sources_summary'] # Check source exists in summary dict
     assert isinstance(run_stats_arg['run_duration_secs'], float)
 
     # Assert: Check logs

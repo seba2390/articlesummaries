@@ -79,6 +79,11 @@ class GroqChecker(BaseLLMChecker):
             # Raise a more specific error or handle inability to initialize
             raise GroqError(f"Failed to initialize Groq client: {e}") from e
 
+    @property
+    def provider_name(self) -> str:
+        """Returns the name of the LLM provider."""
+        return "groq"
+
     def _create_batch_system_prompt(self, count: int) -> str:
         """Creates the system prompt instructing the LLM to return a JSON array for a batch."""
         return (

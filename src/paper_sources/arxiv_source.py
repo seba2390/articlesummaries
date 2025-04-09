@@ -32,7 +32,7 @@ class ArxivSource(BasePaperSource):
         self.max_total_results: int = self.DEFAULT_MAX_RESULTS
         self.fetch_window_days: int = self.DEFAULT_FETCH_WINDOW_DAYS  # Add fetch window attribute
 
-    def configure(self, config: Dict[str, Any]):
+    def configure(self, config: Dict[str, Any], source_name: str):
         """Configures the ArxivSource with categories, result limits, and fetch window.
 
         Reads the following keys from the provided configuration dictionary:
@@ -42,9 +42,13 @@ class ArxivSource(BasePaperSource):
 
         Args:
             config: The main application configuration dictionary.
+            source_name: The identifier for this source (should be 'arxiv').
         """
-        # Read categories and fetch window from the nested structure
-        arxiv_config = config.get("paper_source", {}).get("arxiv", {})
+        # Read categories and fetch window from the nested structure using source_name
+        arxiv_config = config.get("paper_source", {}).get(source_name, {})
+        if not arxiv_config:
+            logger.warning(f"No configuration found for source '{source_name}' under 'paper_source'. Using defaults.")
+
         self.categories = arxiv_config.get("categories", [])
 
         # Read fetch_window, validate, and store

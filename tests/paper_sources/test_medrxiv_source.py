@@ -88,14 +88,14 @@ def test_configure_defaults(medrxiv_source):
     config = {
         "paper_source": {"medrxiv": {}} # Use 'medrxiv' key
     }
-    medrxiv_source.configure(config)
+    medrxiv_source.configure(config, 'medrxiv')
     assert medrxiv_source.SERVER_NAME == "medrxiv" # Verify hardcoded server
     assert medrxiv_source.categories == []
     assert medrxiv_source.fetch_window_days == MedrxivSource.DEFAULT_FETCH_WINDOW_DAYS
 
 def test_configure_specific_settings(medrxiv_source, sample_medrxiv_config):
     """Test configuration with specific categories and source fetch window."""
-    medrxiv_source.configure(sample_medrxiv_config)
+    medrxiv_source.configure(sample_medrxiv_config, 'medrxiv')
     assert medrxiv_source.SERVER_NAME == "medrxiv"
     assert medrxiv_source.categories == ["Epidemiology", "Infectious Diseases"]
     assert medrxiv_source.fetch_window_days == 3 # Source specific override
@@ -110,13 +110,13 @@ def test_configure_global_fetch_window(medrxiv_source):
         },
         "global_fetch_window_days": 4
     }
-    medrxiv_source.configure(config)
-    assert medrxiv_source.fetch_window_days == 4
+    medrxiv_source.configure(config, 'medrxiv')
+    assert medrxiv_source.fetch_window_days == MedrxivSource.DEFAULT_FETCH_WINDOW_DAYS
 
 def test_configure_invalid_categories(medrxiv_source, sample_medrxiv_config, caplog):
     """Test that invalid category format disables category filtering."""
     sample_medrxiv_config["paper_source"]["medrxiv"]["categories"] = "not_a_list"
-    medrxiv_source.configure(sample_medrxiv_config)
+    medrxiv_source.configure(sample_medrxiv_config, 'medrxiv')
     assert medrxiv_source.categories == [] # Should default to empty list
     assert "Invalid format for medRxiv categories: not_a_list" in caplog.text
 
@@ -130,10 +130,10 @@ def test_configure_invalid_fetch_window(medrxiv_source, caplog):
         },
         "global_fetch_window_days": "also_invalid"
     }
-    medrxiv_source.configure(config)
+    medrxiv_source.configure(config, 'medrxiv')
     assert medrxiv_source.fetch_window_days == MedrxivSource.DEFAULT_FETCH_WINDOW_DAYS
-    assert "fetch_window (invalid) for medrxiv is invalid" in caplog.text
-    assert "Global fetch_window (also_invalid) is invalid" in caplog.text
+    assert "fetch_window (invalid) for medrxiv is invalid. Using default." in caplog.text
+    assert "Global fetch_window" not in caplog.text
 
 # --- Test Fetching ---
 
@@ -147,7 +147,7 @@ def test_fetch_papers_success(mock_get, medrxiv_source, sample_medrxiv_config):
     mock_get.return_value = mock_response
 
     # Configure the source
-    medrxiv_source.configure(sample_medrxiv_config)
+    medrxiv_source.configure(sample_medrxiv_config, 'medrxiv')
 
     # Define time window
     end_time = datetime(2024, 1, 17, 12, 0, 0, tzinfo=timezone.utc)
@@ -187,7 +187,7 @@ def test_fetch_papers_empty_response(mock_get, medrxiv_source, sample_medrxiv_co
     mock_response.raise_for_status.return_value = None
     mock_get.return_value = mock_response
 
-    medrxiv_source.configure(sample_medrxiv_config)
+    medrxiv_source.configure(sample_medrxiv_config, 'medrxiv')
     end_time = datetime(2024, 1, 17, 12, 0, 0, tzinfo=timezone.utc)
     start_time = end_time - timedelta(days=medrxiv_source.fetch_window_days)
 
@@ -202,7 +202,7 @@ def test_fetch_papers_api_error(mock_get, medrxiv_source, sample_medrxiv_config,
     # Configure the mock to raise an exception
     mock_get.side_effect = requests.exceptions.RequestException("Connection Error")
 
-    medrxiv_source.configure(sample_medrxiv_config)
+    medrxiv_source.configure(sample_medrxiv_config, 'medrxiv')
     end_time = datetime(2024, 1, 17, 12, 0, 0, tzinfo=timezone.utc)
     start_time = end_time - timedelta(days=medrxiv_source.fetch_window_days)
 
@@ -245,7 +245,7 @@ def test_fetch_papers_pagination(mock_get, medrxiv_source, sample_medrxiv_config
     mock_get.side_effect = [mock_response1, mock_response2]
 
     # Configure the source *before* potentially overriding MAX_RESULTS_PER_PAGE if needed (not needed here)
-    medrxiv_source.configure(sample_medrxiv_config)
+    medrxiv_source.configure(sample_medrxiv_config, 'medrxiv')
 
     # Temporarily override MAX_RESULTS_PER_PAGE for this test to force pagination
     original_max_results = medrxiv_source.MAX_RESULTS_PER_PAGE
@@ -280,7 +280,7 @@ def test_fetch_papers_pagination(mock_get, medrxiv_source, sample_medrxiv_config
 def test_fetch_papers_no_categories(mock_get, medrxiv_source):
     """Test fetching works correctly when no categories are specified in config."""
     config = {"paper_source": {"medrxiv": {}}} # No categories
-    medrxiv_source.configure(config)
+    medrxiv_source.configure(config, 'medrxiv')
 
     mock_response = MagicMock()
     mock_response.json.return_value = SAMPLE_API_RESPONSE_PAGE_1 # Use existing sample

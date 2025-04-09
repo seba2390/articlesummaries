@@ -1,0 +1,19 @@
+# Settings for medRxiv (using the bioRxiv API endpoint)
+medrxiv:
+  # medRxiv subject categories (case-sensitive, use underscores for spaces if needed by API)
+  # Examples: "Epidemiology", "Infectious Diseases", "Cardiology"
+  # Find categories on the medRxiv website. Leave empty [] to search all.
+  categories: [
+                "Epidemiology",
+                "Infectious Diseases (except HIV)",
+                "Health Informatics"
+              ]
+  # Keywords specific to filtering papers fetched ONLY from medRxiv
+  # Used only when relevance_checking_method is "keyword".
+  keywords: [
+             "public health",
+             "clinical trial",
+             "pandemic",
+             "vaccine"
+            ]
+  fetch_window: 3 # Optional: Override global fetch window

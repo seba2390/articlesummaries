@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from requests.exceptions import RequestException
@@ -28,15 +28,16 @@ class MedrxivSource(BasePaperSource):
     BASE_API_URL = "https://api.biorxiv.org/details"
     MAX_RESULTS_PER_PAGE = 100  # API serves 100 results per page
     SERVER_NAME = "medrxiv"  # Hardcoded for this source
+    DEFAULT_MAX_TOTAL_RESULTS = None  # Default to no limit for this source
 
     def __init__(self):
         """Initializes MedrxivSource with default values."""
         self.categories: List[str] = []
-        # Use the default from BasePaperSource, will be overridden by configure
         self.fetch_window_days: int = self.DEFAULT_FETCH_WINDOW_DAYS
+        self.max_total_results: Optional[int] = self.DEFAULT_MAX_TOTAL_RESULTS  # Added attribute
         logger.info(f"MedrxivSource initialized for server: {self.SERVER_NAME}")
 
-    def configure(self, config: Dict[str, Any]):
+    def configure(self, config: Dict[str, Any], source_name: str):
         """Configures the MedrxivSource with categories and fetch window.
 
         Reads the following keys:
@@ -46,8 +47,12 @@ class MedrxivSource(BasePaperSource):
 
         Args:
             config: The main application configuration dictionary.
+            source_name: The identifier for this source (should be 'medrxiv').
         """
-        medrxiv_config = config.get("paper_source", {}).get("medrxiv", {})
+        # Use source_name to get the specific config block
+        medrxiv_config = config.get("paper_source", {}).get(source_name, {})
+        if not medrxiv_config:
+            logger.warning(f"No configuration found for source '{source_name}' under 'paper_source'. Using defaults.")
 
         # Configure categories
         self.categories = medrxiv_config.get("categories", [])
@@ -64,7 +69,7 @@ class MedrxivSource(BasePaperSource):
 
         # Configure fetch window (priority: source-specific > global > default)
         fetch_window_source = medrxiv_config.get("fetch_window")
-        fetch_window_global = config.get("global_fetch_window_days")
+        # fetch_window_global = config.get("global_fetch_window_days") # Removed
 
         chosen_fetch_window = self.DEFAULT_FETCH_WINDOW_DAYS  # Start with default
 
@@ -78,36 +83,41 @@ class MedrxivSource(BasePaperSource):
                     )
                 else:
                     logger.warning(
-                        f"Source-specific fetch_window ({fetch_window_source}) for {self.SERVER_NAME} is not positive. Checking global."
+                        # f"Source-specific fetch_window ({fetch_window_source}) for {self.SERVER_NAME} is not positive. Checking global."
+                        f"Source-specific fetch_window ({fetch_window_source}) for {self.SERVER_NAME} is not positive. Using default."
                     )
             except (ValueError, TypeError):
                 logger.warning(
-                    f"Source-specific fetch_window ({fetch_window_source}) for {self.SERVER_NAME} is invalid. Checking global."
-                )
-
-        if chosen_fetch_window == self.DEFAULT_FETCH_WINDOW_DAYS and fetch_window_global is not None:
-            # Only use global if source-specific wasn't set or was invalid/non-positive
-            try:
-                fetch_window_int = int(fetch_window_global)
-                if fetch_window_int > 0:
-                    chosen_fetch_window = fetch_window_int
-                    logger.info(f"Using global fetch window: {chosen_fetch_window} days for {self.SERVER_NAME}.")
-                else:
-                    logger.warning(
-                        f"Global fetch_window ({fetch_window_global}) is not positive. Using default for {self.SERVER_NAME}."
-                    )
-            except (ValueError, TypeError):
-                logger.warning(
-                    f"Global fetch_window ({fetch_window_global}) is invalid. Using default for {self.SERVER_NAME}."
+                    # f"Source-specific fetch_window ({fetch_window_source}) for {self.SERVER_NAME} is invalid. Checking global."
+                    f"Source-specific fetch_window ({fetch_window_source}) for {self.SERVER_NAME} is invalid. Using default."
                 )
 
         self.fetch_window_days = chosen_fetch_window
-        if (
-            self.fetch_window_days == self.DEFAULT_FETCH_WINDOW_DAYS
-            and fetch_window_source is None
-            and fetch_window_global is None
-        ):
-            logger.info(f"Using default fetch window: {self.fetch_window_days} days for {self.SERVER_NAME}.")
+        if chosen_fetch_window == self.DEFAULT_FETCH_WINDOW_DAYS and fetch_window_source is None:
+            logger.info(
+                f"No specific fetch_window found for {self.SERVER_NAME}. Using default: {self.fetch_window_days} days."
+            )
+
+        # Read max_total_results from the top-level config, allow None
+        max_results_config = config.get("max_total_results", self.DEFAULT_MAX_TOTAL_RESULTS)
+        if max_results_config is not None:
+            try:
+                max_results_int = int(max_results_config)
+                if max_results_int > 0:
+                    self.max_total_results = max_results_int
+                    logger.info(f"Maximum total results for {self.SERVER_NAME} set to: {self.max_total_results}")
+                else:
+                    logger.warning(
+                        f"Configured max_total_results ({max_results_config}) is not positive. Disabling limit for {self.SERVER_NAME}."
+                    )
+                    self.max_total_results = self.DEFAULT_MAX_TOTAL_RESULTS
+            except (ValueError, TypeError):
+                logger.warning(
+                    f"Configured max_total_results ({max_results_config}) is invalid. Disabling limit for {self.SERVER_NAME}."
+                )
+                self.max_total_results = self.DEFAULT_MAX_TOTAL_RESULTS
+        else:
+            logger.info(f"No max_total_results limit applied for {self.SERVER_NAME}.")
 
     def fetch_papers(self, start_time_utc: datetime, end_time_utc: datetime) -> List[Paper]:
         """Fetches papers from the medRxiv API within the given time window.
@@ -133,11 +143,20 @@ class MedrxivSource(BasePaperSource):
         cursor = 0
         total_results = -1  # Initialize to indicate total is unknown
         processed_dois = set()
+        papers_collected_count = 0  # Track papers collected to check against limit
 
         # Use tqdm for progress if total results become known
         pbar = None
+        limit_reached = False  # Flag to signal breaking the outer loop
 
         while True:
+            # Check if limit has been reached *before* fetching next page
+            if self.max_total_results is not None and papers_collected_count >= self.max_total_results:
+                logger.info(
+                    f"Reached max_total_results limit ({self.max_total_results}). Stopping fetch for {self.SERVER_NAME}."
+                )
+                break
+
             fetch_url = f"{self.BASE_API_URL}/{self.SERVER_NAME}/{interval}/{cursor}/json"
             params = {}
             if self.categories:
@@ -226,11 +245,33 @@ class MedrxivSource(BasePaperSource):
                     categories=[item.get("category", "N/A")],  # API seems to return one primary category
                 )
                 papers.append(paper)
+                papers_collected_count += 1  # Increment collected count
                 if pbar:
                     pbar.update(1)  # Increment progress bar for each valid paper processed
 
+            # Stop processing this page if limit reached
+            if self.max_total_results is not None and papers_collected_count >= self.max_total_results:
+                logger.info(
+                    f"Reached max_total_results limit ({self.max_total_results}) within page. Stopping processing for {self.SERVER_NAME}."
+                )
+                limit_reached = True  # Set the flag
+                break  # Break inner loop (page processing)
+
+            # After processing the page, check if the limit was reached
+            if limit_reached:
+                break  # Break outer loop (pagination)
+
             # Update cursor for next page
-            next_cursor = messages.get("cursor", 0) + messages.get("count", 0)
+            # Ensure cursor and count are treated as integers
+            try:
+                current_cursor_val = int(messages.get("cursor", 0))
+                count_val = int(messages.get("count", 0))
+                next_cursor = current_cursor_val + count_val
+            except (ValueError, TypeError) as e:
+                logger.error(
+                    f"Error converting cursor/count to int: {e}. Response messages: {messages}. Stopping pagination."
+                )
+                break  # Stop pagination if values are invalid
 
             # Check if we should stop pagination
             # Stop if count returned is less than max per page OR
@@ -258,5 +299,12 @@ class MedrxivSource(BasePaperSource):
             pbar.n = len(processed_dois)  # Set final count
             pbar.close()
 
-        logger.info(f"✅ Finished fetching from {self.SERVER_NAME}. Total unique papers processed: {len(papers)}.")
+        # Truncate list if limit was applied and exceeded
+        if self.max_total_results is not None and len(papers) > self.max_total_results:
+            logger.info(f"Truncating fetched papers list from {len(papers)} to {self.max_total_results} due to limit.")
+            papers = papers[: self.max_total_results]
+
+        logger.info(
+            f"✅ Finished fetching from {self.SERVER_NAME}. Total unique papers processed: {len(papers)}."
+        )  # Log final count after potential truncation
         return papers

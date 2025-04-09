@@ -36,7 +36,8 @@ class EmailSender:
         self.sender_config = notification_config.get("email_sender", {})
         self.smtp_config = notification_config.get("smtp", {})
         self.recipients = notification_config.get("email_recipients", [])
-        self.send_email = notification_config.get("send_email_summary", False)
+        # Read the global flag from the main config, not nested under notifications
+        self.send_email = config.get("send_email_summary", False)
         self.output_config = config.get("output", {})  # Keep for _format_paper_html
 
         # Validate essential configuration if email sending is enabled
