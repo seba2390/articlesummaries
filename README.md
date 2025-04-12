@@ -4,7 +4,7 @@
 
 ## 📝 Overview
 
-This project provides a configurable Python application to monitor publications from multiple academic sources, currently supporting **arXiv** and **bioRxiv/medRxiv**. It automatically fetches recent papers across specified categories, checks their relevance based on configured methods (keywords or LLM), outputs the findings to a file, and sends comprehensive email summaries.
+This project provides a configurable Python application to monitor publications from multiple academic sources, currently supporting **arXiv** and **bioRxiv/medRxiv**. It automatically fetches recent papers across specified categories, checks their relevance based on configured methods (keywords, LLM, or local Sentence Transformer models), outputs the findings to a file, and sends comprehensive email summaries.
 
 The application runs on a daily schedule defined in the configuration and features a modular design for potential extension.
 
@@ -21,7 +21,7 @@ The application runs on a daily schedule defined in the configuration and featur
 *   **Detailed Email Summaries:** Sends HTML emails summarizing each run, including source-specific fetch statistics (count, window, query times) and details of relevant papers (title, link, authors, categories, matched keywords/LLM info, abstract).
 *   **File Output:** Appends relevant paper details to a configurable file (`markdown` or `plain` text format), optionally including LLM metadata.
 *   **Scheduled Execution:** Runs automatically via `schedule` library at a configurable time and timezone.
-*   **Progress Indicators:** Uses `tqdm` for visual feedback during API calls.
+*   **Progress Feedback:** Provides feedback during potentially lengthy operations (e.g., model downloads, batch processing).
 *   **Structured Logging:** Provides informative console output.
 *   **Modular & Tested:** Built with Abstract Base Classes (ABCs) and includes `pytest` tests (with markers to skip external API calls).
 
