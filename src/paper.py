@@ -25,3 +25,12 @@ class Paper:
         default=None
     )  # Relevance info from LLM check (e.g., {'confidence': 0.9, 'explanation': '...'})
     matched_keywords: Optional[List[str]] = field(default=None)  # Keywords from config that matched this paper
+    keywords_matched: Optional[List[str]] = None  # Added by KeywordFilter
+    confidence_score: Optional[float] = None  # Added by LLMFilter
+    llm_explanation: Optional[str] = None  # Added by LLMFilter
+    similarity_score: Optional[float] = None  # Added by SentenceTransformerFilter
+    matched_target: Optional[str] = None  # Added by SentenceTransformerFilter
+
+    def __str__(self) -> str:
+        author_str = ", ".join(self.authors) if self.authors else "N/A"
+        return f"{self.title} by {author_str}"

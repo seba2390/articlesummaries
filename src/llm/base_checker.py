@@ -2,7 +2,10 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
+from typing import Any, Dict, List
+
+from src.filtering.base_filter import BaseFilter
+from src.paper import Paper
 
 
 @dataclass
@@ -21,20 +24,33 @@ class LLMResponse:
     explanation: str = "No explanation provided."  # Default explanation
 
 
-class BaseLLMChecker(ABC):
+class BaseLLMChecker(BaseFilter, ABC):
     """Abstract base class defining the interface for LLM relevance checkers.
 
     Concrete implementations should inherit from this class and implement
     the `check_relevance` and `check_relevance_batch` methods for interacting
     with specific LLM APIs (e.g., Groq, OpenAI, Anthropic).
+
+    They must also implement the `configure` and `filter` methods from BaseFilter.
     """
 
     @abstractmethod
     def __init__(self, **kwargs):
         """Initialize the checker, potentially with API keys, models, etc."""
+        self.configured = False  # Add a configured flag
         # Concrete implementations should define their specific parameters.
         # Example: def __init__(self, api_key: str, model: str = "default-model"): ...
         pass
+
+    @abstractmethod
+    def configure(self, config: Dict[str, Any]):
+        """Configures the filter instance using settings from the application config."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def filter(self, papers: List[Paper]) -> List[Paper]:
+        """Applies the filter logic to a list of papers."""
+        raise NotImplementedError
 
     @property
     @abstractmethod

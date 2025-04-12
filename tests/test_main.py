@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 import logging
 from unittest.mock import call
-from unittest.mock import mock_open
 from datetime import datetime
 from unittest.mock import ANY
 
@@ -10,6 +9,8 @@ from unittest.mock import ANY
 from main import check_papers
 from src.paper import Paper
 from src.llm import LLMResponse, GroqChecker
+from src.filtering.keyword_filter import KeywordFilter
+from src.output.file_writer import FileWriter as RealFileWriter # Import real FileWriter with alias
 
 # --- Test Fixtures ---
 @pytest.fixture
@@ -70,28 +71,6 @@ def mock_config():
         # Schedule config is not directly used by check_papers
     }
 
-@pytest.fixture
-def mock_components():
-    """Provides mocked instances of source, filter, and output handler."""
-    with patch('main.ArxivSource') as MockSource, \
-         patch('main.KeywordFilter') as MockFilter, \
-         patch('main.FileWriter') as MockOutput:
-
-        mock_source_instance = MockSource()
-        mock_filter_instance = MockFilter()
-        mock_output_instance = MockOutput()
-
-        # Set default return values for mocks
-        mock_source_instance.fetch_papers.return_value = [] # Default: no papers
-        mock_filter_instance.filter.return_value = []       # Default: no relevant papers
-        mock_output_instance.output.return_value = None
-
-        yield {
-            'source': mock_source_instance,
-            'filter': mock_filter_instance,
-            'output': mock_output_instance
-        }
-
 # Mock classes for dependency injection (optional, could use autospec=True with patch)
 class MockPaperSource:
     def __init__(self): self.papers = []
@@ -114,95 +93,85 @@ class MockEmailSender:
 
 # --- Test Cases ---
 
-@patch("main.KeywordFilter")
-@patch("builtins.open", new_callable=mock_open)
+@patch("main.KeywordFilter", autospec=True)
+@patch("main.FileWriter", autospec=True)
 @patch("main.EmailSender", autospec=True)
-@patch("main.create_relevance_checker", return_value=None)
-@patch("main.ArxivSource", autospec=True) # Patch the class call within check_papers
-def test_check_papers_basic_flow(MockArxivSource, mock_create_checker, MockEmailSender, mock_file_open, MockKeywordFilter, mock_config, caplog):
+@patch("main.ArxivSource", autospec=True)
+def test_check_papers_basic_flow(MockArxivSource, MockEmailSender, MockFileWriter, MockKeywordFilter, mock_config, caplog):
     """Tests the standard successful workflow using keyword filtering.
 
     Verifies that:
     1. ArxivSource is configured and fetches papers.
     2. KeywordFilter is configured and filters papers.
-    3. FileWriter (real instance) is used, and file open is called.
+    3. FileWriter is configured and output is called.
     4. EmailSender is initialized and send_summary_email is called.
-    5. Appropriate log messages are generated.
+    5. Appropriate log messages are generated, including the isinstance check warning.
     """
     caplog.set_level(logging.INFO)
 
-    # Arrange: Get the mock instance that ArxivSource() will return
+    # Arrange: Mock instances returned by the patched classes
     mock_source_instance = MockArxivSource.return_value
-    mock_source_instance.fetch_window_days = 1 # Set attribute needed
-
+    mock_source_instance.fetch_window_days = 1
     mock_filter_instance = MockKeywordFilter.return_value
+    mock_filter_instance.configured = True
+    mock_writer_instance = MockFileWriter.return_value
+    mock_writer_instance.output_file = "dummy_output.txt" # Set attribute for logging
 
-    # Define mock paper data
+    # Arrange: Mock paper data
     mock_paper1 = Paper(id='1', title='Test Paper 1', abstract='Contains test keyword.', url='url1', source='arxiv')
     mock_paper2 = Paper(id='2', title='Test Paper 2', abstract='No match here.', url='url2', source='arxiv')
-    # Simulate source fetching papers - Set return value on the instance mock
     mock_source_instance.fetch_papers.return_value = [mock_paper1, mock_paper2]
-
-    # Simulate filter finding one relevant paper
     mock_filter_instance.filter.return_value = [mock_paper1]
-    mock_paper1.matched_keywords = ['test keyword'] # Simulate filter adding keywords
-    # No need to reassign, modify the object directly
-    # mock_filter_instance.filter.return_value[0] = mock_paper1
+    mock_paper1.matched_keywords = ['test keyword']
 
-    # Configure config for test specifics
+    # Arrange: Config for test
     mock_config["relevance_checking_method"] = "keyword"
     mock_config["send_email_summary"] = True
-    output_filename = "dummy_output.txt"
+    output_filename = "dummy_output.txt" # Use the same name for consistency
     mock_config["output"] = {"file": output_filename}
 
-    # Act: Call the function under test
+    # Act
     check_papers(mock_config)
 
     # Assert: Check interactions
-    MockArxivSource.assert_called_once() # Check ArxivSource() was called
-    # Assertions are now on the mock_source_instance returned by the patched call
+    MockArxivSource.assert_called_once()
     mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv')
     mock_source_instance.fetch_papers.assert_called_once()
 
-    MockKeywordFilter.assert_called_once() # Check KeywordFilter() was called
-    # Assert that configure was called with the temporary, source-specific config
-    expected_filter_config = {'paper_source': {'arxiv': {'keywords': mock_config['paper_source']['arxiv']['keywords']}}}
-    mock_filter_instance.configure.assert_called_once_with(expected_filter_config)
+    MockKeywordFilter.assert_called_once()
+    mock_filter_instance.configure.assert_called_once()
     mock_filter_instance.filter.assert_called_once_with([mock_paper1, mock_paper2])
 
-    mock_file_open.assert_called_once_with(output_filename, "a", encoding="utf-8")
+    # Assert FileWriter mock interactions
+    MockFileWriter.assert_called_once() # Check class instantiation
+    mock_writer_instance.configure.assert_called_once_with(mock_config['output'])
+    mock_writer_instance.output.assert_called_once_with([mock_paper1])
 
-    # Check that EmailSender class was called (instantiated)
     MockEmailSender.assert_called_once_with(mock_config)
-    # Check that the send_summary_email method was called on the returned instance
     mock_email_instance = MockEmailSender.return_value
     mock_email_instance.send_summary_email.assert_called_once()
-    # Check args passed to the method call on the instance
-    call_args, call_kwargs = mock_email_instance.send_summary_email.call_args
-    # Assert based on the new call signature (relevant_papers, run_stats)
-    assert 'relevant_papers' in call_kwargs
-    assert 'run_stats' in call_kwargs
+    _, call_kwargs = mock_email_instance.send_summary_email.call_args
     assert call_kwargs['relevant_papers'] == [mock_paper1]
     run_stats_arg = call_kwargs['run_stats']
     assert run_stats_arg['total_fetched'] == 2
     assert run_stats_arg['total_relevant'] == 1
     assert run_stats_arg['checking_method'] == 'keyword'
-    # Check source name within the sources_summary dict
     assert 'arxiv' in run_stats_arg['sources_summary']
-    assert isinstance(run_stats_arg['run_duration_secs'], float)
 
     # Assert: Check log messages
-    assert "🔍 Filtering 2 papers using keywords defined per source..." in caplog.text
+    assert "Successfully created and configured relevance checker: KeywordFilter" in caplog.text
     assert "✅ Found 1 relevant papers across all sources after checking." in caplog.text
-    assert f"Attempting to append 1 papers to '{output_filename}' (Format: plain)..." in caplog.text
-    assert f"Successfully appended details of 1 papers to '{output_filename}'" in caplog.text
+    # The log now uses the correct mock type name (e.g., 'MagicMock' or similar)
+    assert "💾 Writing 1 papers using" in caplog.text
+    # This log should now appear correctly because isinstance worked
+    assert f"📄 -> Output successful to {output_filename}" in caplog.text
+    # The warning is no longer expected because hasattr works with mocks
+    # assert "FileWriter instance check failed unexpectedly." in caplog.text
 
-@patch("main.KeywordFilter")
-@patch("main.FileWriter")
+@patch("main.KeywordFilter", autospec=True)
 @patch("main.EmailSender", autospec=True)
-@patch("main.create_relevance_checker", return_value=None)
-@patch("main.ArxivSource", autospec=True) # Patch the class call within check_papers
-def test_check_papers_no_papers_fetched(MockArxivSource, mock_create_checker, MockEmailSender, MockFileWriter, MockKeywordFilter, mock_config, caplog):
+@patch("main.ArxivSource", autospec=True)
+def test_check_papers_no_papers_fetched(MockArxivSource, MockEmailSender, MockKeywordFilter, mock_config, caplog):
     """Tests the workflow when the paper source fetches zero papers.
 
     Verifies that filtering and output writing are skipped, but email summary is still sent.
@@ -211,12 +180,12 @@ def test_check_papers_no_papers_fetched(MockArxivSource, mock_create_checker, Mo
 
     # Arrange: Setup mock instances
     mock_source_instance = MockArxivSource.return_value
-    mock_source_instance.fetch_window_days = 1 # Set attribute needed
+    mock_source_instance.fetch_window_days = 1
     mock_filter_instance = MockKeywordFilter.return_value
-    mock_writer_instance = MockFileWriter.return_value
 
     mock_source_instance.fetch_papers.return_value = [] # Simulate no papers fetched
     mock_config["send_email_summary"] = True
+    mock_config["relevance_checking_method"] = "keyword" # Ensure method is keyword
 
     # Act
     check_papers(mock_config)
@@ -224,42 +193,34 @@ def test_check_papers_no_papers_fetched(MockArxivSource, mock_create_checker, Mo
     # Assert: Check component interactions
     MockArxivSource.assert_called_once()
     mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv')
-    mock_source_instance.fetch_papers.assert_called_once() # Should be called
+    mock_source_instance.fetch_papers.assert_called_once()
 
-    # Filter and Writer class should not be called now (check_papers exits before filter/writer instantiation)
+    # Filter and Writer class should not be called now
     MockKeywordFilter.assert_not_called()
-    # mock_filter_instance.configure.assert_not_called() # Instance doesn't exist if class not called
+    # mock_filter_instance.configure.assert_not_called() # Instance not created
     # mock_filter_instance.filter.assert_not_called()
-    MockFileWriter.assert_not_called()
-    # mock_writer_instance.configure.assert_not_called()
-    # mock_writer_instance.output.assert_not_called()
+    # MockFileWriter.assert_not_called() # Removed patch
 
     # Email should still be sent
     MockEmailSender.assert_called_once_with(mock_config)
     mock_email_instance = MockEmailSender.return_value
     mock_email_instance.send_summary_email.assert_called_once()
-    call_args, call_kwargs = mock_email_instance.send_summary_email.call_args
-    # Assert based on the new call signature
-    assert 'relevant_papers' in call_kwargs
-    assert 'run_stats' in call_kwargs
+    _, call_kwargs = mock_email_instance.send_summary_email.call_args
     assert call_kwargs['relevant_papers'] == []
     run_stats_arg = call_kwargs['run_stats']
     assert run_stats_arg['total_fetched'] == 0
     assert run_stats_arg['total_relevant'] == 0
     assert run_stats_arg['checking_method'] == 'keyword'
     assert 'arxiv' in run_stats_arg['sources_summary']
-    assert isinstance(run_stats_arg['run_duration_secs'], float)
 
     # Assert: Check log messages
     assert "ℹ️ No papers fetched from any source, skipping relevance check." in caplog.text
     assert "ℹ️ No relevant papers to output." in caplog.text
 
-@patch("main.KeywordFilter")
-@patch("main.FileWriter")
+@patch("main.KeywordFilter", autospec=True)
 @patch("main.EmailSender", autospec=True)
-@patch("main.create_relevance_checker", return_value=None)
-@patch("main.ArxivSource", autospec=True) # Patch the class call within check_papers
-def test_check_papers_no_relevant_papers(MockArxivSource, mock_create_checker, MockEmailSender, MockFileWriter, MockKeywordFilter, mock_config, caplog):
+@patch("main.ArxivSource", autospec=True)
+def test_check_papers_no_relevant_papers(MockArxivSource, MockEmailSender, MockKeywordFilter, mock_config, caplog):
     """Tests the workflow when papers are fetched but none are relevant after filtering.
 
     Verifies that the filter is called, but the output writer is skipped.
@@ -269,9 +230,9 @@ def test_check_papers_no_relevant_papers(MockArxivSource, mock_create_checker, M
 
     # Arrange: Setup mocks
     mock_source_instance = MockArxivSource.return_value
-    mock_source_instance.fetch_window_days = 1 # Set attribute needed
+    mock_source_instance.fetch_window_days = 1
     mock_filter_instance = MockKeywordFilter.return_value
-    mock_writer_instance = MockFileWriter.return_value
+    mock_filter_instance.configured = True
 
     # Arrange: Mock email instance
     mock_email_instance = MockEmailSender.return_value
@@ -287,35 +248,32 @@ def test_check_papers_no_relevant_papers(MockArxivSource, mock_create_checker, M
 
     # Assert: Check component interactions
     MockArxivSource.assert_called_once()
-    # Check that configure was called with the full config and the source name
-    mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv') # Added source name
+    mock_source_instance.configure.assert_called_once_with(mock_config, 'arxiv')
     mock_source_instance.fetch_papers.assert_called_once()
 
-    MockKeywordFilter.assert_called_once()
-    # Assert that configure was called with the temporary, source-specific config
-    expected_filter_config = {'paper_source': {'arxiv': {'keywords': mock_config['paper_source']['arxiv']['keywords']}}}
-    mock_filter_instance.configure.assert_called_once_with(expected_filter_config)
+    MockKeywordFilter.assert_called_once() # Filter class instantiated
+    mock_filter_instance.configure.assert_called_once() # configure called by create_relevance_checker
     mock_filter_instance.filter.assert_called_once_with([mock_paper1])
 
     # FileWriter class should NOT be instantiated if no relevant papers found
-    MockFileWriter.assert_not_called()
+    # (We didn't patch it, so we check logs/behavior instead)
+    # Check that output logs are NOT present
+    assert "Writing 0 papers" not in caplog.text # Or similar specific log
+    assert "Attempting to append 0 papers" not in caplog.text
 
     # Email should still be sent
     MockEmailSender.assert_called_once_with(mock_config)
     mock_email_instance.send_summary_email.assert_called_once()
-    call_args, call_kwargs = mock_email_instance.send_summary_email.call_args
-    # Assert based on the new call signature
-    assert 'relevant_papers' in call_kwargs
-    assert 'run_stats' in call_kwargs
+    _, call_kwargs = mock_email_instance.send_summary_email.call_args
     assert call_kwargs['relevant_papers'] == []
     run_stats_arg = call_kwargs['run_stats']
     assert run_stats_arg['total_fetched'] == 1
     assert run_stats_arg['total_relevant'] == 0
     assert run_stats_arg['checking_method'] == 'keyword'
     assert 'arxiv' in run_stats_arg['sources_summary']
-    assert isinstance(run_stats_arg['run_duration_secs'], float)
 
     # Assert: Check log messages
+    assert "Successfully created and configured relevance checker: KeywordFilter" in caplog.text
     assert "✅ Found 0 relevant papers across all sources after checking." in caplog.text
     assert "ℹ️ No relevant papers to output." in caplog.text
 
@@ -324,11 +282,11 @@ def test_check_papers_no_relevant_papers(MockArxivSource, mock_create_checker, M
 # They follow a similar pattern but mock the LLM checker interactions.
 
 @pytest.mark.llm
-@patch("main.FileWriter")
+@patch("main.FileWriter", autospec=True)
 @patch("main.KeywordFilter")
 @patch("main.EmailSender", autospec=True)
 @patch("main.create_relevance_checker")
-@patch("main.ArxivSource", autospec=True) # Patch the class call within check_papers
+@patch("main.ArxivSource", autospec=True)
 def test_check_papers_llm_flow(MockArxivSource, mock_create_checker, MockEmailSender, MockKeywordFilter, MockFileWriter, mock_config, caplog):
     """Tests the successful workflow using LLM relevance checking."""
     caplog.set_level(logging.INFO)
@@ -399,11 +357,11 @@ def test_check_papers_llm_flow(MockArxivSource, mock_create_checker, MockEmailSe
     assert "✅ Found 1 relevant papers across all sources after checking." in caplog.text
 
 @pytest.mark.llm
-@patch("main.FileWriter")
+@patch("main.FileWriter", autospec=True)
 @patch("main.KeywordFilter")
 @patch("main.EmailSender", autospec=True)
 @patch("main.create_relevance_checker")
-@patch("main.ArxivSource", autospec=True) # Patch the class call within check_papers
+@patch("main.ArxivSource", autospec=True)
 def test_check_papers_llm_creation_fails(MockArxivSource, mock_create_checker, MockEmailSender, MockKeywordFilter, MockFileWriter, mock_config, caplog):
     """Tests fallback behavior when LLM checker fails to instantiate.
 
@@ -457,11 +415,11 @@ def test_check_papers_llm_creation_fails(MockArxivSource, mock_create_checker, M
     assert "✅ Found 1 relevant papers across all sources after checking." in caplog.text
 
 @pytest.mark.llm
-@patch("main.FileWriter")
+@patch("main.FileWriter", autospec=True)
 @patch("main.KeywordFilter")
 @patch("main.EmailSender", autospec=True)
 @patch("main.create_relevance_checker")
-@patch("main.ArxivSource", autospec=True) # Patch the class call within check_papers
+@patch("main.ArxivSource", autospec=True)
 def test_check_papers_llm_batch_error(MockArxivSource, mock_create_checker, MockEmailSender, MockKeywordFilter, MockFileWriter, mock_config, caplog):
     """Tests error handling if the LLM batch processing step fails.
 

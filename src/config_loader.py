@@ -6,7 +6,7 @@ on the configuration file (typically `config.yaml`).
 
 import logging
 import os  # Import os for path checking
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import yaml  # Library for parsing YAML files
 
@@ -19,6 +19,15 @@ MAIN_CONFIG_FILENAME = "main_config.yaml"
 EMAIL_CONFIG_FILENAME = "email_config.yaml"
 PAPER_SOURCES_CONFIG_SUBDIR = "paper_sources_configs"
 LLM_CONFIG_SUBDIR = "llm_configs"
+
+# Define default paths relative to the project root
+DEFAULT_MAIN_CONFIG = "main_config.yaml"
+DEFAULT_CONFIGS_DIR = "configs"
+DEFAULT_SOURCES_SUBDIR = "paper_sources_configs"
+DEFAULT_EMAIL_CONFIG = "email_config.yaml"
+DEFAULT_LLM_SUBDIR = "llm_configs"
+DEFAULT_ST_SUBDIR = "local_sentence_transformer_configs"  # New subdir
+DEFAULT_ST_CONFIG = "sentence_transformer_config.yaml"  # New default config file
 
 
 def _load_single_config(file_path: str) -> Optional[Dict[str, Any]]:
@@ -78,137 +87,143 @@ def _load_single_config(file_path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def load_config(
-    main_config_path: str = MAIN_CONFIG_FILENAME,
-    configs_dir: str = CONFIGS_DIR,
-    email_config_filename: str = EMAIL_CONFIG_FILENAME,
-    paper_sources_subdir: str = PAPER_SOURCES_CONFIG_SUBDIR,
-    llm_config_subdir: str = LLM_CONFIG_SUBDIR,
-) -> Optional[Dict[str, Any]]:
-    """Loads the main configuration and merges in source-specific, LLM, and notification configurations.
+def deep_update(source: Dict, overrides: Dict) -> Dict:
+    """Deeply update dictionary source with overrides."""
+    for key, value in overrides.items():
+        if isinstance(value, dict) and key in source and isinstance(source[key], dict):
+            source[key] = deep_update(source[key], value)
+        else:
+            source[key] = value
+    return source
 
-    1. Loads the main configuration file (`main_config.yaml` by default).
-    2. Identifies active sources from the main config.
-    3. Loads the corresponding `<source_name>_config.yaml` files from `configs/paper_sources_configs/`.
-    4. Identifies the LLM provider (if `relevance_checking_method` is `llm`).
-    5. Loads the corresponding `<provider>_llm_config.yaml` from `configs/llm_configs/`.
-    6. Loads the email configuration (`email_config.yaml` by default) from `configs/`.
-    7. Merges the source configurations under `main_config['paper_source']`.
-    8. Merges the LLM provider configuration into `main_config['relevance_checker']['llm']`.
-    9. Merges the email configuration under `main_config['notifications']`.
 
-    Args:
-        main_config_path: Path to the main configuration file.
-        configs_dir: Path to the base directory containing subdirectories for configs.
-        email_config_filename: Filename for the email configuration within `configs_dir`.
-        paper_sources_subdir: Subdirectory within `configs_dir` for paper source configs.
-        llm_config_subdir: Subdirectory within `configs_dir` for LLM configs.
-
-    Returns:
-        A dictionary containing the merged configuration if loading is successful,
-        otherwise None.
-    """
-    # 1. Load main configuration
-    main_config = _load_single_config(main_config_path)
-    if main_config is None:
-        logger.critical(f"Failed to load main configuration from '{main_config_path}'. Cannot proceed.")
+def load_config(main_config_path: str = DEFAULT_MAIN_CONFIG) -> Optional[Dict[str, Any]]:
+    """Loads the main config and merges configs from subdirectories."""
+    if not os.path.exists(main_config_path):
+        logger.error(f"Main configuration file not found: {main_config_path}")
         return None
 
-    # Ensure required top-level keys exist, even if empty from main load
-    main_config.setdefault("paper_source", {})
-    main_config.setdefault("notifications", {})  # Ensure notifications key exists
-    main_config.setdefault("relevance_checker", {}).setdefault("llm", {})  # Ensure llm key exists for merging
+    try:
+        with open(main_config_path, "r") as f:
+            config: Dict[str, Any] = yaml.safe_load(f)
+        logger.info(f"Configuration section loaded successfully from '{main_config_path}'")
+    except Exception as e:
+        logger.error(f"Failed to load or parse main configuration from {main_config_path}: {e}", exc_info=True)
+        return None
 
-    # 2. Identify active sources
-    active_sources: List[str] = main_config.get("active_sources", [])
-    if not isinstance(active_sources, list):
-        logger.error(f"'active_sources' in '{main_config_path}' is not a list. Cannot load source configs.")
-        # Proceed without source configs, might be intended? Or return None? Let's log and proceed for now.
-        active_sources = []
-    else:
+    if config is None:
+        logger.error(f"Main configuration file {main_config_path} is empty or invalid.")
+        return None
+
+    configs_dir = os.path.dirname(main_config_path) or "."  # Get dir of main config or use current
+    configs_base_dir = os.path.join(configs_dir, DEFAULT_CONFIGS_DIR)
+
+    # 1. Load Paper Source Configs
+    active_sources = config.get("active_sources", [])
+    if active_sources:
         logger.info(f"Identified active sources for config loading: {active_sources}")
+        sources_config_dir = os.path.join(configs_base_dir, DEFAULT_SOURCES_SUBDIR)
+        config["paper_source"] = config.get("paper_source", {})  # Ensure key exists
 
-    # 3. Load source-specific configurations from the subdirectory
-    source_configs_path = os.path.join(configs_dir, paper_sources_subdir)
-    for source_name in active_sources:
-        source_config_filename = f"{source_name}_config.yaml"
-        source_config_path = os.path.join(source_configs_path, source_config_filename)  # Use subdir path
-        source_config = _load_single_config(source_config_path)
-
-        if source_config is None:
-            logger.error(
-                f"Failed to load configuration for source '{source_name}' from '{source_config_path}'. Skipping this source."
-            )
-            # Optionally, remove source from active_sources? For now, just skip loading its config.
-            continue
-        elif not isinstance(source_config.get(source_name), dict):
-            logger.error(
-                f"Expected key '{source_name}' with dictionary value in '{source_config_path}', but found {type(source_config.get(source_name)).__name__}. Skipping merge for this source."
-            )
-            continue
-
-        # 5. Merge source config into main config under 'paper_source'
-        # Expecting structure: { 'source_name': { ... settings ...} } in the source file
-        if source_name in source_config:
-            # Only merge if the top-level key matches the source name
-            main_config["paper_source"][source_name] = source_config[source_name]
-            logger.debug(f"Merged config for source: {source_name}")
-        else:
-            logger.warning(
-                f"Source config file '{source_config_path}' loaded, but did not contain expected top-level key '{source_name}'."
-            )
-
-    # 4. Load LLM provider configuration (if applicable)
-    if main_config.get("relevance_checking_method") == "llm":
-        llm_provider = main_config.get("relevance_checker", {}).get("llm", {}).get("provider")
-        if llm_provider:
-            llm_config_filename = f"{llm_provider}_llm_config.yaml"
-            llm_configs_path = os.path.join(configs_dir, llm_config_subdir)
-            llm_config_filepath = os.path.join(llm_configs_path, llm_config_filename)
-            provider_config = _load_single_config(llm_config_filepath)
-
-            if provider_config is None:
-                logger.error(
-                    f"Failed to load LLM config for provider '{llm_provider}' from '{llm_config_filepath}'. LLM checking might fail."
-                )
-            elif llm_provider not in provider_config:
-                logger.error(
-                    f"LLM config file '{llm_config_filepath}' is missing the top-level '{llm_provider}' key. Cannot merge settings."
-                )
-            elif not isinstance(provider_config[llm_provider], dict):
-                logger.error(
-                    f"'{llm_provider}' key in '{llm_config_filepath}' does not contain a dictionary. Cannot merge settings."
-                )
+        for source_name in active_sources:
+            source_config_file = f"{source_name}_config.yaml"
+            source_config_path = os.path.join(sources_config_dir, source_config_file)
+            if os.path.exists(source_config_path):
+                try:
+                    with open(source_config_path, "r") as f:
+                        source_specific_config = yaml.safe_load(f)
+                    if source_specific_config and isinstance(source_specific_config, dict):
+                        # Merge this source's config under config["paper_source"][source_name]
+                        # Ensure the source_name key exists
+                        config["paper_source"][source_name] = config["paper_source"].get(source_name, {})
+                        config["paper_source"][source_name] = deep_update(
+                            config["paper_source"][source_name],
+                            source_specific_config.get(source_name, {}),  # Expect settings under source_name key
+                        )
+                        logger.info(f"Configuration section loaded successfully from '{source_config_path}'")
+                    else:
+                        logger.warning(f"Source config file {source_config_path} is empty or invalid.")
+                except Exception as e:
+                    logger.error(f"Failed to load source config {source_config_path}: {e}", exc_info=True)
             else:
-                # 8. Merge LLM provider config into main config
-                # Ensure the llm key exists before trying to update
-                main_config.setdefault("relevance_checker", {}).setdefault("llm", {}).update(provider_config)
-                logger.info(
-                    f"Successfully merged LLM configuration for provider '{llm_provider}' from '{llm_config_filepath}'."
+                logger.warning(
+                    f"Configuration file for active source '{source_name}' not found at {source_config_path}"
                 )
-        else:
-            logger.warning("Relevance checking method is 'llm', but no provider specified in main_config.yaml.")
 
-    # 5. Load email configuration (path remains relative to configs_dir)
-    email_config_path = os.path.join(configs_dir, email_config_filename)
-    email_config = _load_single_config(email_config_path)
-
-    if email_config is None:
-        logger.error(f"Failed to load email configuration from '{email_config_path}'. Email notifications might fail.")
-        # Proceed without email config? Or make it critical? For now, log and proceed.
-    elif "notifications" not in email_config:
-        logger.error(
-            f"Email config file '{email_config_path}' is missing the top-level 'notifications' key. Cannot merge email settings."
-        )
-    elif not isinstance(email_config["notifications"], dict):
-        logger.error(
-            f"'notifications' key in '{email_config_path}' does not contain a dictionary. Cannot merge email settings."
-        )
+    # 2. Load Email Config
+    email_config_path = os.path.join(configs_base_dir, DEFAULT_EMAIL_CONFIG)
+    if os.path.exists(email_config_path):
+        try:
+            with open(email_config_path, "r") as f:
+                email_config = yaml.safe_load(f)
+            if email_config and isinstance(email_config, dict):
+                # Merge the 'notifications' section from email config into main config
+                main_notifications = config.get("notifications", {})
+                if not isinstance(main_notifications, dict):
+                    logger.warning("'notifications' in main config is not a dictionary, overriding with email config.")
+                    main_notifications = {}
+                config["notifications"] = deep_update(main_notifications, email_config.get("notifications", {}))
+                logger.info(f"Successfully merged email configuration from '{email_config_path}'.")
+            else:
+                logger.warning(f"Email config file {email_config_path} is empty or invalid.")
+        except Exception as e:
+            logger.error(f"Failed to load or merge email config {email_config_path}: {e}", exc_info=True)
     else:
-        # 9. Merge email config into main config under 'notifications'
-        # Merge carefully: update existing 'notifications' dict without overwriting other potential keys
-        main_config["notifications"].update(email_config["notifications"])
-        logger.info(f"Successfully merged email configuration from '{email_config_path}'.")
+        logger.warning(f"Email configuration file not found at {email_config_path}")
 
-    # Final combined configuration
-    return main_config
+    # 3. Load LLM Config (if applicable)
+    checking_method = config.get("relevance_checking_method", "keyword").lower()
+    if checking_method == "llm":
+        llm_provider = config.get("relevance_checker", {}).get("llm", {}).get("provider")
+        if llm_provider:
+            llm_config_file = f"{llm_provider}_llm_config.yaml"
+            llm_config_path = os.path.join(configs_base_dir, DEFAULT_LLM_SUBDIR, llm_config_file)
+            if os.path.exists(llm_config_path):
+                try:
+                    with open(llm_config_path, "r") as f:
+                        llm_specific_config = yaml.safe_load(f)
+                    if llm_specific_config and isinstance(llm_specific_config, dict):
+                        # Ensure structure exists before merging
+                        config["relevance_checker"] = config.get("relevance_checker", {})
+                        config["relevance_checker"]["llm"] = config["relevance_checker"].get("llm", {})
+                        config["relevance_checker"]["llm"][llm_provider] = config["relevance_checker"]["llm"].get(
+                            llm_provider, {}
+                        )
+                        # Merge provider-specific settings
+                        config["relevance_checker"]["llm"][llm_provider] = deep_update(
+                            config["relevance_checker"]["llm"][llm_provider], llm_specific_config.get(llm_provider, {})
+                        )
+                        logger.info(f"Successfully merged LLM provider config from '{llm_config_path}'.")
+                    else:
+                        logger.warning(f"LLM config file {llm_config_path} is empty or invalid.")
+                except Exception as e:
+                    logger.error(f"Failed to load LLM config {llm_config_path}: {e}", exc_info=True)
+            else:
+                logger.warning(f"LLM configuration file for provider '{llm_provider}' not found at {llm_config_path}")
+        else:
+            logger.warning("LLM checking method selected, but no provider specified in main_config.")
+
+    # 4. Load Sentence Transformer Config (if applicable)
+    elif checking_method == "local_sentence_transformer":
+        st_config_path = os.path.join(configs_base_dir, DEFAULT_ST_SUBDIR, DEFAULT_ST_CONFIG)
+        if os.path.exists(st_config_path):
+            try:
+                with open(st_config_path, "r") as f:
+                    st_config = yaml.safe_load(f)
+                if st_config and isinstance(st_config, dict):
+                    # Ensure structure exists before merging
+                    config["relevance_checker"] = config.get("relevance_checker", {})
+                    # Merge the specific filter settings
+                    config["relevance_checker"]["sentence_transformer_filter"] = deep_update(
+                        config["relevance_checker"].get("sentence_transformer_filter", {}),
+                        st_config.get("sentence_transformer_filter", {}),
+                    )
+                    logger.info(f"Successfully merged Sentence Transformer config from '{st_config_path}'.")
+                else:
+                    logger.warning(f"Sentence Transformer config file {st_config_path} is empty or invalid.")
+            except Exception as e:
+                logger.error(f"Failed to load Sentence Transformer config {st_config_path}: {e}", exc_info=True)
+        else:
+            logger.warning(f"Sentence Transformer config file not found at {st_config_path}")
+
+    return config

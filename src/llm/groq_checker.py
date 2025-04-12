@@ -4,7 +4,7 @@ import json
 import logging
 import os  # Added for potential future env var use
 import time
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Removed requests import as we will use the Groq SDK
 # import requests
@@ -12,6 +12,8 @@ from groq import APIConnectionError, APIStatusError, Groq, GroqError, RateLimitE
 
 # Import specific type for message params to fix linter error
 from groq.types.chat.completion_create_params import ChatCompletionMessageParam
+
+from src.paper import Paper  # Import Paper
 
 from .base_checker import BaseLLMChecker, LLMResponse
 
@@ -70,14 +72,99 @@ class GroqChecker(BaseLLMChecker):
         )
         logger.info(f"Using batch size: {self.batch_size}, Batch delay: {self.batch_delay_seconds}s")
 
-        # Initialize the Groq client
+        # Initialize the Groq client - moved from __init__ to configure
+        self.client: Optional[Groq] = None
+        self.prompt: str = "Is this paper relevant?"  # Default prompt
+        self.confidence_threshold: float = 0.0  # Default threshold (accept all)
+        self.configured = False  # Initialize configured flag
+
+    def configure(self, config: Dict[str, Any]):
+        """Configures the GroqChecker instance from the application config."""
+        logger.debug("Configuring GroqChecker...")
         try:
+            llm_config = config.get("relevance_checker", {}).get("llm", {})
+            groq_config = llm_config.get("groq", {})
+
+            # API Key (already handled in __init__ if passed directly, but re-check config)
+            if not self.api_key:
+                api_key_from_config = groq_config.get("api_key") or os.getenv("GROQ_API_KEY")
+                if not api_key_from_config:
+                    logger.error(
+                        "❌ Groq API key missing. Set GROQ_API_KEY env var or config['relevance_checker']['llm']['groq']['api_key']."
+                    )
+                    self.configured = False
+                    return
+                self.api_key = api_key_from_config
+
+            # Model (already handled in __init__ with default, allow override)
+            self.model = groq_config.get("model", self.model)
+
+            # Batch Size (already handled in __init__ with default, allow override)
+            batch_size_cfg = groq_config.get("batch_size")
+            if batch_size_cfg is not None:
+                try:
+                    self.batch_size = int(batch_size_cfg)
+                    if self.batch_size <= 0:
+                        logger.warning(
+                            f"Invalid batch_size {self.batch_size} in config, using default {DEFAULT_BATCH_SIZE}."
+                        )
+                        self.batch_size = DEFAULT_BATCH_SIZE
+                except ValueError:
+                    logger.warning(
+                        f"Invalid batch_size format '{batch_size_cfg}' in config, using default {DEFAULT_BATCH_SIZE}."
+                    )
+                    self.batch_size = DEFAULT_BATCH_SIZE
+
+            # Batch Delay (already handled in __init__ with default, allow override)
+            batch_delay_cfg = groq_config.get("batch_delay_seconds")
+            if batch_delay_cfg is not None:
+                try:
+                    self.batch_delay_seconds = float(batch_delay_cfg)
+                    if self.batch_delay_seconds < 0:
+                        logger.warning(
+                            f"Invalid batch_delay_seconds {self.batch_delay_seconds} in config, using default {DEFAULT_BATCH_DELAY_SECONDS}."
+                        )
+                        self.batch_delay_seconds = DEFAULT_BATCH_DELAY_SECONDS
+                except ValueError:
+                    logger.warning(
+                        f"Invalid batch_delay_seconds format '{batch_delay_cfg}' in config, using default {DEFAULT_BATCH_DELAY_SECONDS}."
+                    )
+                    self.batch_delay_seconds = DEFAULT_BATCH_DELAY_SECONDS
+
+            # Prompt
+            self.prompt = groq_config.get("prompt", self.prompt)
+            if not self.prompt:
+                logger.error("❌ Groq relevance prompt is missing or empty in config.")
+                self.configured = False
+                return
+
+            # Confidence Threshold
+            conf_thresh_cfg = groq_config.get("confidence_threshold")
+            if conf_thresh_cfg is not None:
+                try:
+                    self.confidence_threshold = float(conf_thresh_cfg)
+                    if not (0.0 <= self.confidence_threshold <= 1.0):
+                        logger.warning(
+                            f"Invalid confidence_threshold {self.confidence_threshold}, must be 0.0-1.0. Using 0.0."
+                        )
+                        self.confidence_threshold = 0.0
+                except ValueError:
+                    logger.warning(f"Invalid confidence_threshold format '{conf_thresh_cfg}'. Using 0.0.")
+                    self.confidence_threshold = 0.0
+            else:
+                self.confidence_threshold = 0.0  # Default if not specified
+
+            # Initialize the Groq client now that we have confirmed API key
             self.client = Groq(api_key=self.api_key, timeout=DEFAULT_REQUEST_TIMEOUT)
             logger.info(f"Groq client initialized successfully for model: {self.model}")
+            logger.info(
+                f"GroqChecker Configured: Model={self.model}, BatchSize={self.batch_size}, Delay={self.batch_delay_seconds}s, Threshold={self.confidence_threshold}"
+            )
+            self.configured = True
+
         except Exception as e:
-            logger.error(f"Failed to initialize Groq client: {e}", exc_info=True)
-            # Raise a more specific error or handle inability to initialize
-            raise GroqError(f"Failed to initialize Groq client: {e}") from e
+            logger.error(f"❌ Failed to configure GroqChecker: {e}", exc_info=True)
+            self.configured = False
 
     @property
     def provider_name(self) -> str:
@@ -135,6 +222,11 @@ class GroqChecker(BaseLLMChecker):
         batch_actual_size = len(abstract_batch)
         if batch_actual_size == 0:
             return []
+
+        # Add check for initialized client
+        if self.client is None:
+            logger.error("Groq client not initialized. Cannot process batch.")
+            return [LLMResponse(explanation="Error: Groq client not initialized.")] * batch_actual_size
 
         system_prompt = self._create_batch_system_prompt(batch_actual_size)
         user_message = self._create_batch_user_message(abstract_batch, prompt)
@@ -319,6 +411,68 @@ class GroqChecker(BaseLLMChecker):
 
         logger.info(f"Batch relevance check for {total_abstracts} abstracts completed in {duration_total:.2f} seconds.")
         return all_responses  # Return all collected responses
+
+    def filter(self, papers: List[Paper]) -> List[Paper]:
+        """Filters papers based on LLM relevance check using Groq."""
+        if not self.configured or self.client is None:
+            logger.error("GroqChecker cannot filter: not configured or client not initialized.")
+            return []  # Return empty list if not configured
+
+        if not papers:
+            return []
+
+        logger.info(f"Checking relevance of {len(papers)} papers using LLM (Groq: {self.model})...")
+
+        # Extract abstracts and filter out papers with no abstract
+        papers_with_abstracts = [p for p in papers if p.abstract]
+        if len(papers_with_abstracts) < len(papers):
+            logger.warning(f"Skipping {len(papers) - len(papers_with_abstracts)} papers due to missing abstracts.")
+
+        if not papers_with_abstracts:
+            return []
+
+        abstracts_to_check = [p.abstract for p in papers_with_abstracts if p.abstract]  # Ensure non-None abstracts
+
+        # Call the batch processing method
+        start_time = time.time()
+        try:
+            llm_responses = self.check_relevance_batch(abstracts_to_check, self.prompt)
+        except Exception as e:
+            logger.error(f"Error during Groq relevance batch check: {e}", exc_info=True)
+            return []  # Return empty on batch processing error
+        duration = time.time() - start_time
+        logger.info(f"LLM batch processing completed in {duration:.2f} seconds.")
+
+        # Check if the number of responses matches the number of papers checked
+        if len(llm_responses) != len(papers_with_abstracts):
+            logger.error(
+                f"LLM response count ({len(llm_responses)}) mismatch with checked paper count ({len(papers_with_abstracts)}). Cannot reliably filter."
+            )
+            return []
+
+        # Add relevance info back to papers and filter based on response and threshold
+        relevant_papers: List[Paper] = []
+        for paper, response in zip(papers_with_abstracts, llm_responses):
+            # Store the full response object in the paper
+            paper.relevance = {
+                "is_relevant": response.is_relevant,
+                "confidence": response.confidence,
+                "explanation": response.explanation,
+                "provider": self.provider_name,
+                "model": self.model,
+            }
+
+            # Apply filtering based on is_relevant and confidence threshold
+            if response.is_relevant and response.confidence >= self.confidence_threshold:
+                relevant_papers.append(paper)
+                logger.debug(f"  Relevant: {paper.id} (Conf: {response.confidence:.2f})")
+            else:
+                logger.debug(
+                    f"Irrelevant: {paper.id} (Relevant: {response.is_relevant}, Conf: {response.confidence:.2f}, Threshold: {self.confidence_threshold})"
+                )
+
+        logger.info(f"Found {len(relevant_papers)} relevant papers after LLM check (Groq).")
+        return relevant_papers
 
     # --- Removed old batch processing methods that used requests and /batches ---
     # _poll_batch_and_get_results

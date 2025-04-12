@@ -7,10 +7,13 @@ active_sources:
   - "biorxiv"
   - "medrxiv"
 
-# --- Relevance Checking Method ---
-# Determines the overall method used for checking paper relevance.
-# Options: "keyword" or "llm"
-relevance_checking_method: "keyword"
+# --- Relevance Checking ---
+# Method to determine relevance: "keyword", "llm", "local_sentence_transformer", or "none".
+# - "keyword": Uses keyword lists defined in each source's config file (e.g., configs/paper_sources_configs/arxiv_config.yaml).
+# - "llm": Uses an external LLM provider (e.g., Groq) configured via configs/llm_configs/.
+# - "local_sentence_transformer": Uses a local Sentence Transformer model configured via configs/local_sentence_transformer_configs/.
+# - "none": Treats all fetched papers as relevant.
+relevance_checking_method: "local_sentence_transformer"
 
 # --- Enable/Disable Email ---
 # Set this to 'true' to enable sending summary emails, 'false' to disable.

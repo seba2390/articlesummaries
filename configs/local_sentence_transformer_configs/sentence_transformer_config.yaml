@@ -1,0 +1,26 @@
+# Configuration for the Sentence Transformer filter
+
+sentence_transformer_filter:
+  # The name of the Sentence Transformer model to use.
+  # See https://www.sbert.net/docs/pretrained_models.html for options.
+  # 'all-MiniLM-L6-v2' is a good starting point: lightweight and performs well, but "all-mpnet-base-v2",
+  # and "all-MiniLM-L12-v2" are also good options.
+  model_name: "all-MiniLM-L12-v2"
+
+  # The minimum cosine similarity score (0.0 to 1.0) required between a paper's
+  # abstract embedding and the target text embedding for the paper to be considered relevant.
+  # Adjust based on experimentation. Higher values mean stricter relevance.
+  similarity_threshold: 0.3
+
+  # The target text or texts that define your core research interest.
+  # The filter will find papers whose abstracts are semantically similar to these.
+  # You can provide a single string or a list of strings.
+  # If a list is provided, a paper is considered relevant if its abstract is
+  # sufficiently similar to *any* of the target texts.
+  target_texts:
+    - "My research is on tensor networks for quantum circuit simulations, quantum circuit simulation in general and variational quantum algorithms for both combinatorial optimization and quantum chemistry."
+
+  # Optional: Specify device ('cuda', 'cpu', 'mps'). Defaults to auto-detection.
+  # device: null
+  # Number of abstracts to encode in a single batch (adjust based on VRAM/RAM).
+  batch_size: 2

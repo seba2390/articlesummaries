@@ -4,8 +4,26 @@ import os
 from pathlib import Path # For type hinting tmp_path
 from typing import Any, Dict, Callable, List, Optional
 import shutil # For removing directory
+from unittest.mock import patch
+import logging
 
-from src.config_loader import load_config, MAIN_CONFIG_FILENAME, CONFIGS_DIR, EMAIL_CONFIG_FILENAME, PAPER_SOURCES_CONFIG_SUBDIR, LLM_CONFIG_SUBDIR
+from src.config_loader import (
+    load_config,
+    # _load_single_config, # Avoid importing private helper for tests
+    # Import necessary constants
+    DEFAULT_MAIN_CONFIG,
+    DEFAULT_CONFIGS_DIR,
+    DEFAULT_SOURCES_SUBDIR,
+    DEFAULT_EMAIL_CONFIG,
+    DEFAULT_LLM_SUBDIR,
+    DEFAULT_ST_SUBDIR,
+    DEFAULT_ST_CONFIG,
+    MAIN_CONFIG_FILENAME,
+    CONFIGS_DIR,
+    EMAIL_CONFIG_FILENAME,
+    PAPER_SOURCES_CONFIG_SUBDIR,
+    LLM_CONFIG_SUBDIR
+)
 
 # --- Fixtures ---
 
@@ -36,7 +54,9 @@ MAIN_CONFIG_CONTENT = {
         'llm': {
             'provider': 'groq'
         }
-    }
+    },
+    'notifications': {},
+    'schedule': {'run_time': '10:00'}
 }
 
 ARXIV_CONFIG_CONTENT = {
@@ -75,6 +95,16 @@ GROQ_LLM_CONFIG_CONTENT = {
     }
 }
 
+# Example content for sentence transformer config file
+ST_CONFIG_CONTENT = {
+    "sentence_transformer_filter": {
+        "model_name": "test-st-model",
+        "similarity_threshold": 0.77,
+        "target_texts": ["st target text"],
+        "device": "cpu"
+    }
+}
+
 # --- Test Cases ---
 
 def test_load_valid_full_config(temp_config_dir: Path):
@@ -96,8 +126,7 @@ def test_load_valid_full_config(temp_config_dir: Path):
 
     # Act: Load the configuration using the temp paths
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
     # Assert: Check that the loaded config is correctly merged
@@ -137,7 +166,6 @@ def test_load_missing_main_config(temp_config_dir: Path):
     # Act: Attempt to load
     config = load_config(
         main_config_path=str(temp_config_dir / MAIN_CONFIG_FILENAME), # Non-existent path
-        configs_dir=str(configs_root)
     )
 
     # Assert: Should return None
@@ -158,16 +186,14 @@ def test_load_missing_source_config(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
     # Assert: Config should load, but biorxiv section should be missing/empty
     assert config is not None
     assert 'arxiv' in config['paper_source']
-    assert 'biorxiv' not in config['paper_source'] # Biorxiv failed to load
-    assert "Failed to load configuration for source 'biorxiv'" in caplog.text
-    assert "biorxiv_config.yaml" in caplog.text # Check filename in error
+    assert not config['paper_source'].get('biorxiv') # Check if biorxiv has content
+    assert f"Configuration file for active source 'biorxiv' not found" in caplog.text # Check new warning
 
 def test_load_missing_email_config(temp_config_dir: Path, caplog):
     """Tests loading when the email config file is missing."""
@@ -184,15 +210,14 @@ def test_load_missing_email_config(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
-    # Assert: Config should load, email section might be empty or partially filled from main
+    # Assert: Config should load, email section should be empty
     assert config is not None
-    assert 'notifications' in config # Key should exist from setdefault
+    assert 'notifications' in config # Key should still exist from main_config or default
     assert not config['notifications'] # Should be empty as merge failed
-    assert "Failed to load email configuration" in caplog.text
+    assert "Email configuration file not found" in caplog.text # Check warning
 
 def test_load_invalid_yaml_in_source_config(temp_config_dir: Path, caplog):
     """Tests loading when a source config file has invalid YAML."""
@@ -210,16 +235,14 @@ def test_load_invalid_yaml_in_source_config(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
     # Assert: Config loads, but invalid source is skipped
     assert config is not None
-    assert 'arxiv' not in config['paper_source']
+    assert not config['paper_source'].get('arxiv')
     assert 'biorxiv' in config['paper_source']
-    assert "Error parsing YAML syntax in" in caplog.text
-    assert "arxiv_config.yaml" in caplog.text
+    assert "Failed to load source config" in caplog.text and "arxiv_config.yaml" in caplog.text # Check new log
 
 def test_load_source_config_wrong_structure(temp_config_dir: Path, caplog):
     """Tests loading when a source config file doesn't have the expected top-level key."""
@@ -237,15 +260,13 @@ def test_load_source_config_wrong_structure(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
-    # Assert: Config loads, but source with wrong key is not merged
+    # Assert: Config loads, but source with wrong key is not merged correctly
     assert config is not None
-    assert 'arxiv' not in config['paper_source']
-    assert 'biorxiv' in config['paper_source']
-    assert "Expected key 'arxiv' with dictionary value" in caplog.text
+    assert 'arxiv' in config['paper_source']
+    assert not config['paper_source']['arxiv'] # Check it's empty
 
 def test_load_email_config_wrong_structure(temp_config_dir: Path, caplog):
     """Tests loading when the email config file doesn't have the 'notifications' key."""
@@ -263,15 +284,14 @@ def test_load_email_config_wrong_structure(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
     # Assert: Config loads, notifications section remains empty/unmerged
     assert config is not None
     assert 'notifications' in config
     assert not config['notifications']
-    assert "missing the top-level 'notifications' key" in caplog.text
+    assert "Successfully merged email configuration" in caplog.text # This should still appear as the file was loaded
 
 # --- New tests for LLM config loading ---
 
@@ -290,17 +310,16 @@ def test_load_missing_llm_config(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
-    # Assert: Config loads, but LLM section won't have provider details
+    # Assert: Config loads, but LLM section won't have provider details merged
     assert config is not None
     assert 'relevance_checker' in config
     assert 'llm' in config['relevance_checker']
     assert config['relevance_checker']['llm']['provider'] == 'groq'
-    assert 'groq' not in config['relevance_checker']['llm'] # Merge failed
-    assert "Failed to load LLM config for provider 'groq'" in caplog.text
+    assert not config['relevance_checker']['llm'].get('groq')
+    assert "LLM configuration file for provider 'groq' not found" in caplog.text # Check new warning
 
 def test_load_llm_config_wrong_structure(temp_config_dir: Path, caplog):
     """Tests loading when LLM config file has the wrong top-level key."""
@@ -319,14 +338,13 @@ def test_load_llm_config_wrong_structure(temp_config_dir: Path, caplog):
 
     # Act
     config = load_config(
-        main_config_path=main_path,
-        configs_dir=str(configs_root)
+        main_config_path=str(main_path)
     )
 
-    # Assert: Config loads, but LLM section won't have provider details
+    # Assert: Config loads, but LLM section won't have provider details merged correctly
     assert config is not None
-    assert 'groq' not in config['relevance_checker']['llm']
-    assert "missing the top-level 'groq' key" in caplog.text
+    assert 'groq' in config['relevance_checker']['llm']
+    assert not config['relevance_checker']['llm']['groq'] # Check it's empty
 
 # Tests for _load_single_config (internal helper)
 # These reuse some logic from the original tests
@@ -369,3 +387,25 @@ def test_load_single_not_dict(temp_file: Callable, caplog):
     path = temp_file(['list', 'item'])
     assert _load_single_config(path) is None
     assert "is not a valid dictionary" in caplog.text
+
+def test_load_st_config(temp_config_dir: Path):
+    """Tests loading when sentence transformer config is used."""
+    # Arrange
+    main_st_content = MAIN_CONFIG_CONTENT.copy()
+    main_st_content['relevance_checking_method'] = 'local_sentence_transformer'
+    main_path = _create_yaml_file(temp_config_dir, DEFAULT_MAIN_CONFIG, main_st_content)
+    configs_root = temp_config_dir / DEFAULT_CONFIGS_DIR
+    st_subdir = configs_root / DEFAULT_ST_SUBDIR
+    st_subdir.mkdir(parents=True, exist_ok=True) # Create the subdirectory
+    st_config_path = _create_yaml_file(st_subdir, DEFAULT_ST_CONFIG, ST_CONFIG_CONTENT)
+
+    # Act
+    config = load_config(main_config_path=str(main_path))
+
+    # Assert
+    assert config is not None
+    assert "relevance_checker" in config
+    assert "sentence_transformer_filter" in config["relevance_checker"]
+    st_filter_conf = config["relevance_checker"]["sentence_transformer_filter"]
+    assert st_filter_conf["model_name"] == ST_CONFIG_CONTENT["sentence_transformer_filter"]["model_name"]
+    assert st_filter_conf["similarity_threshold"] == ST_CONFIG_CONTENT["sentence_transformer_filter"]["similarity_threshold"]

@@ -18,9 +18,10 @@ from typing import Any, Dict, List, Optional
 import colorlog
 
 from src.config_loader import load_config
+from src.filtering.base_filter import BaseFilter
 from src.filtering.keyword_filter import KeywordFilter
+from src.filtering.sentence_transformer_filter import SentenceTransformerFilter
 from src.llm import GroqChecker
-from src.llm.base_checker import BaseLLMChecker
 from src.notifications.email_sender import EmailSender
 from src.output.base_output import BaseOutput
 from src.output.file_writer import FileWriter
@@ -123,58 +124,96 @@ def create_paper_source(source_name: str, config: Dict[str, Any]) -> Optional[Ba
         return None
 
 
-def create_relevance_checker(
-    config: Dict[str, Any],
-) -> Optional[BaseLLMChecker]:
-    """Factory function to create an LLM relevance checker instance based on config.
+def create_relevance_checker(config: Dict[str, Any]) -> Optional[BaseFilter]:
+    """Creates and configures the appropriate relevance checker based on config."""
+    method = config.get("relevance_checking_method", "keyword").lower()
+    checker: Optional[BaseFilter] = None
+    llm_config = config.get("relevance_checker", {}).get("llm", {})  # Base for LLM settings
 
-    Reads settings from config['relevance_checker']['llm'].
-    Currently supports 'groq'. Returns None if configuration is invalid,
-    the provider is unsupported, or initialization fails.
+    logger.info(f"🔍 Relevance checking method selected: '{method}'")
 
-    Args:
-        config: The main application configuration dictionary.
+    try:
+        if method == "keyword":
+            checker = KeywordFilter()
+            # KeywordFilter specifically uses the 'paper_source' part of the config
+            if "paper_source" in config:
+                # Pass only the relevant part for keyword filter configuration
+                checker.configure({"paper_source": config["paper_source"]})
+            else:
+                logger.error("Keyword filtering selected, but 'paper_source' configuration is missing.")
+                return None  # Config error
+        elif method == "llm":
+            llm_provider = llm_config.get("provider", "").lower()
+            if llm_provider == "groq":
+                # Instantiate GroqChecker correctly, handling potential missing config
+                groq_provider_config = llm_config.get("groq", {})
+                api_key = os.getenv("GROQ_API_KEY") or groq_provider_config.get("api_key")
+                if not api_key:
+                    logger.error(
+                        "❌ Groq provider selected, but API key is missing. "
+                        "Set GROQ_API_KEY env var or relevance_checker.llm.groq.api_key in config."
+                    )
+                    return None  # Missing API key is critical
 
-    Returns:
-        An initialized BaseLLMChecker instance or None on failure.
-    """
-    llm_config = config.get("relevance_checker", {}).get("llm", {})
-    provider = llm_config.get("provider")
+                # Extract other Groq settings with defaults if necessary
+                model = groq_provider_config.get("model")  # GroqChecker might have internal default
+                batch_size_cfg = groq_provider_config.get("batch_size")
+                batch_size = int(batch_size_cfg) if batch_size_cfg is not None else None  # Let GroqChecker handle None
+                batch_delay_cfg = groq_provider_config.get("batch_delay_seconds")
+                batch_delay = (
+                    float(batch_delay_cfg) if batch_delay_cfg is not None else None
+                )  # Let GroqChecker handle None
 
-    if provider == "groq":
-        groq_config = llm_config.get("groq", {})
-        api_key = os.getenv("GROQ_API_KEY") or groq_config.get("api_key")
-
-        if not api_key:
-            logger.error(
-                "❌ Groq provider selected, but API key is missing. "
-                "Set GROQ_API_KEY env var or relevance_checker.llm.groq.api_key in config."
-            )
-            return None
-
-        try:
-            model = groq_config.get("model")
-            batch_size_cfg = groq_config.get("batch_size")
-            batch_size = int(batch_size_cfg) if batch_size_cfg is not None else None
-            batch_delay_cfg = groq_config.get("batch_delay_seconds")
-            batch_delay = float(batch_delay_cfg) if batch_delay_cfg is not None else None
-
-            checker_instance = GroqChecker(
-                api_key=api_key, model=model, batch_size=batch_size, batch_delay_seconds=batch_delay
-            )
-            actual_model = getattr(checker_instance, "model", "[Not Exposed]")
-            logger.info(f"✅ Groq relevance checker initialized successfully (Model: {actual_model}).")
-            return checker_instance  # Return the instance
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize GroqChecker: {e}", exc_info=True)
-            return None
-    # elif provider == "other_provider": ...
-    else:
-        if provider:
-            logger.error(f"❌ LLM checking selected, but unknown provider: '{provider}'")
+                # Assume GroqChecker is compatible with BaseFilter or fix its inheritance
+                # For now, instantiate and let configure handle detailed setup
+                checker = GroqChecker(
+                    api_key=api_key, model=model, batch_size=batch_size, batch_delay_seconds=batch_delay
+                )
+                # Configure immediately after instantiation inside this block
+                checker.configure(config)
+            # Add elif for other LLM providers here
+            else:
+                logger.error(f"❌ Unknown or unsupported LLM provider specified: '{llm_provider}'")
+                return None
+        elif method == "local_sentence_transformer":  # Correct identifier used here
+            checker = SentenceTransformerFilter()
+            # SentenceTransformerFilter expects the full config to find its nested section
+            checker.configure(config)
+        elif method == "none":
+            logger.info("Relevance checking method set to 'none'. All papers will be considered relevant.")
+            return None  # No checker needed
         else:
-            logger.error("❌ LLM checking selected, but no provider specified.")
+            # This error should now only trigger if the value is truly unknown
+            logger.error(f"❌ Unknown relevance_checking_method specified: '{method}'. Defaulting to no check.")
+            return None  # Unknown method
+
+        # Log success if checker was created and configured without error above
+        if checker:
+            actual_model_info = ""
+            if isinstance(checker, GroqChecker):
+                actual_model_info = f"(Model: {getattr(checker, 'model', '[Not Exposed]')})"
+            elif isinstance(checker, SentenceTransformerFilter):
+                actual_model_info = f"(Model: {checker.model_name})"
+            logger.info(
+                f"✅ Successfully created and configured relevance checker: {checker.__class__.__name__} {actual_model_info}"
+            )
+            return checker
+        elif method not in [
+            "none",
+            "keyword",
+            "llm",
+            "local_sentence_transformer",
+        ]:  # Avoid logging failure for explicitly 'none' or already handled config errors
+            logger.error(f"❌ Failed to configure relevance checker for method '{method}'")
+            return None  # Configuration failed
+
+    except Exception as e:
+        logger.error(
+            f"❌ Failed during creation/configuration of relevance checker for method '{method}': {e}", exc_info=True
+        )
         return None
+
+    return None  # Fallback
 
 
 def create_output_handlers(config: Dict[str, Any]) -> List[BaseOutput]:
@@ -298,99 +337,56 @@ def check_papers(config: Dict[str, Any]) -> None:
         total_fetched = sum(stats["fetched"] for stats in source_stats.values())
         logger.info(f"📚 Total papers fetched across all sources: {total_fetched}")
 
-        # 4. Determine the relevance checking method
+        # 4. Determine and Perform Relevance Checking (Refactored)
         checking_method = config.get("relevance_checking_method", "keyword").lower()
-        llm_checker = None
-        keyword_filter = None  # Initialize keyword filter
         relevant_papers: List[Paper] = []
 
         if not all_fetched_papers:
             logger.info("ℹ️ No papers fetched from any source, skipping relevance check.")
         else:
-            if checking_method == "llm":
-                llm_checker = create_relevance_checker(config)
-                if llm_checker:
-                    logger.info(f"🤖🔍 Checking relevance of {total_fetched} papers using LLM...")
-                    # --- LLM Check Path ---
-                    # LLM provider specific config is now nested under the provider name
-                    llm_provider_config = (
-                        config.get("relevance_checker", {}).get("llm", {}).get(llm_checker.provider_name, {})
+            # --- Create and Use the Relevance Checker ---
+            # Headline for Relevance Check
+            title = "Relevance Checking"
+            padding = (80 - len(title) - 2) // 2
+            print(f"\x1b[37m{'=' * padding} {title} {'=' * (80 - padding - len(title) - 2)}\x1b[0m")
+
+            relevance_filter = create_relevance_checker(config)
+
+            if relevance_filter:
+                logger.info(f"⚙️ Using {relevance_filter.__class__.__name__} to filter {total_fetched} papers...")
+                filter_start_time = time.time()
+                try:
+                    relevant_papers = relevance_filter.filter(all_fetched_papers)
+                    filter_duration = time.time() - filter_start_time
+                    logger.info(f"Filter processing completed in {filter_duration:.2f} seconds.")
+                except Exception as filter_e:
+                    logger.error(
+                        f"❌ Error during filtering with {relevance_filter.__class__.__name__}: {filter_e}",
+                        exc_info=True,
                     )
-                    prompt = llm_provider_config.get("prompt", "Is this paper relevant?")
-                    confidence_threshold = llm_provider_config.get("confidence_threshold", 0.7)
-                    abstracts = [p.abstract for p in all_fetched_papers if p.abstract]  # Ensure abstract exists
-                    papers_with_abstracts = [p for p in all_fetched_papers if p.abstract]
-                    if abstracts:
-                        llm_batch_start_time = time.time()
-                        try:
-                            responses = llm_checker.check_relevance_batch(abstracts, prompt)
-                            duration = time.time() - llm_batch_start_time
-                            logger.info(f"LLM batch processing completed in {duration:.2f} seconds.")
-                            for paper, response in zip(papers_with_abstracts, responses):
-                                if response.is_relevant and response.confidence >= confidence_threshold:
-                                    paper.relevance = {
-                                        "confidence": response.confidence,
-                                        "explanation": response.explanation,
-                                    }
-                                    relevant_papers.append(paper)
-                                else:
-                                    logger.debug(f"Paper {paper.id} ({paper.source}) not relevant via LLM.")
-                        except Exception as llm_e:
-                            logger.error(f"❌ Error during LLM batch relevance check: {llm_e}", exc_info=True)
-                    else:
-                        logger.warning("⚠️ No abstracts found in fetched papers for LLM checking.")
-                else:
-                    logger.warning("⚠️ LLM checking selected, but checker failed. Falling back to no check.")
-                    checking_method = "none"  # Fallback
+                    # Fallback: Treat all as relevant? Or none? Let's treat as none if filter fails.
+                    relevant_papers = []
+                    logger.error("Filter failed, treating no papers as relevant.")
 
-            if checking_method == "keyword":  # Check again in case LLM failed
-                # --- Keyword Check Path ---
-                logger.info(f"🔑🔍 Filtering {total_fetched} papers using keywords defined per source...")
-                # Create ONE filter instance, but configure it differently for each source's papers
-                keyword_filter = KeywordFilter()  # Create instance outside the loop
-                filtered_by_source = []
-
-                # Group papers by source first
-                papers_by_source: Dict[str, List[Paper]] = {}
-                for paper in all_fetched_papers:
-                    papers_by_source.setdefault(paper.source, []).append(paper)
-
-                # Filter papers for each source using its specific keywords
-                for source_name, papers_from_source in papers_by_source.items():
-                    source_config = config.get("paper_source", {}).get(source_name, {})
-                    source_keywords = source_config.get("keywords", [])
-
-                    if not source_keywords:
-                        logger.warning(
-                            f"⚠️ No keywords found for source '{source_name}'. Skipping keyword filtering for these papers."
-                        )
-                        # If no keywords, treat all papers from this source as relevant for keyword check?
-                        # Or skip them? For now, let's skip adding them if keywords are expected.
-                        # If you want all papers when keywords are missing, add: filtered_by_source.extend(papers_from_source)
-                        continue  # Skip to next source
-
-                    # Configure the filter *specifically* for this source's keywords
-                    temp_config_for_filter = {"paper_source": {source_name: {"keywords": source_keywords}}}
-                    keyword_filter.configure(temp_config_for_filter)
-
-                    # Filter only the papers from the current source
-                    relevant_from_source = keyword_filter.filter(papers_from_source)
-                    logger.info(
-                        f" -> Source '{source_name}': Found {len(relevant_from_source)} papers matching keywords: {source_keywords}"
-                    )
-                    filtered_by_source.extend(relevant_from_source)
-
-                relevant_papers = filtered_by_source  # Assign the final list
-
-            if checking_method == "none":  # Handle explicit 'none' or fallback
-                logger.info("ℹ️ No specific relevance check performed. Treating all fetched papers as relevant.")
+            elif checking_method == "none":
+                # Explicitly handle the 'none' case where create_relevance_checker returns None
+                logger.info(
+                    "ℹ️ No specific relevance check performed (method was 'none'). Treating all fetched papers as relevant."
+                )
                 relevant_papers = all_fetched_papers
+            else:
+                # Handle cases where create_relevance_checker returned None due to error or unknown method
+                logger.warning(
+                    f"⚠️ Relevance checker for method '{checking_method}' could not be created or configured. Defaulting to treating all papers as relevant."
+                )
+                # Fallback: Treat all fetched papers as relevant if checker failed.
+                relevant_papers = all_fetched_papers
+            # --- End Relevance Check Logic ---
 
         # AFTER relevance checking logic:
         # Headline for Relevance Summary
         title = "Relevance Check Summary"
         padding = (80 - len(title) - 2) // 2
-        # Use print with ANSI codes for light grey color
         print(f"\x1b[37m{'=' * padding} {title} {'=' * (80 - padding - len(title) - 2)}\x1b[0m")
         total_relevant = len(relevant_papers)
         logger.info(f"✅ Found {total_relevant} relevant papers across all sources after checking.")
@@ -412,8 +408,9 @@ def check_papers(config: Dict[str, Any]) -> None:
                         logger.info(f"💾 Writing {len(relevant_papers)} papers using {type(handler).__name__}...")
                         handler.output(relevant_papers)
                         # Try to get output path from file writer specifically
-                        if isinstance(handler, FileWriter):
-                            output_file_path = handler.output_file
+                        # Check if the handler has the attribute, works for real instances and mocks
+                        if hasattr(handler, "output_file"):
+                            output_file_path = handler.output_file  # type: ignore
                             logger.info(f"📄 -> Output successful to {output_file_path}")
                     except Exception as out_e:
                         logger.error(f"❌ Error using output handler {type(handler).__name__}: {out_e}", exc_info=True)
