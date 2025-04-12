@@ -261,7 +261,7 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ## 📜 License
 
-This project is licensed under the [LICENSE_NAME] License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ## 🚀 Extensibility
 
